@@ -8,6 +8,7 @@ use kinogaki_studio_api::{
 };
 use kinogaki_studio_api_testing::Unconverted;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const CUBE: &str = "\
 o a
@@ -30,8 +31,12 @@ f 1/1/1 3/3/1 2/2/1
 l 1 2 3
 ";
 
+/// `name` in a folder of its own: tests run in parallel, and two writing one
+/// path read each other's file half written.
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("kinogaki-obj-{}", std::process::id()));
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    let call = CALLS.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("kinogaki-obj-{}-{call}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir.join(name)
 }
