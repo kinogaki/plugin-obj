@@ -4,7 +4,7 @@ mod read;
 mod write;
 
 pub use model::{MapOptions, Material, MaterialLibrary, TextureMap};
-pub use read::{library_paths, parse, parse_with, read_file};
+pub use read::{library_paths, parse, read_file};
 pub use write::to_bytes;
 
 /// Write `library` to `path`, replacing any file there atomically.

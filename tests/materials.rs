@@ -5,7 +5,7 @@ use kinogaki_obj::Obj;
 use kinogaki_obj::obj::mtl::{self, Material, MaterialLibrary};
 use kinogaki_render_api::MaterialNetwork;
 use kinogaki_render_api::material::mtlx::SIGNATURE;
-use kinogaki_studio_api::format::options::EMBED;
+use kinogaki_studio_api::format::options::{EMBED, OUTSIDE};
 use kinogaki_studio_api::geometry::image::ImageFile;
 use kinogaki_studio_api::geometry::{Attribute, Domain, Geometry, Text, names};
 use kinogaki_studio_api::image_files::{IMAGE_NODE, image_source};
@@ -400,7 +400,8 @@ fn textures_embed_when_asked_and_write_beside_the_library() {
     .unwrap();
     let (held, warnings) = read(&dir.join("model.obj"), &[(EMBED, Value::Bool(true))]);
     assert!(
-        warnings[0].message.contains("gone.png") && warnings[0].message.contains("kept as a path")
+        (warnings.iter()).any(|w| w.message == "no such files: gone.png"),
+        "{warnings:?}"
     );
     let out = scratch("embed-written");
     let (written, _) = write(&out, "scene", &held);
@@ -460,13 +461,15 @@ fn another_model_writes_through_standard_surface() {
 }
 
 /// Every item of the OBJ at `path` (its materials first, then its geometry)
-/// read with the defaults.
+/// read with the defaults, and files outside its folder read: a library
+/// written into a scratch folder names the fixtures' textures where they
+/// are.
 fn items(path: &Path) -> Vec<FileItem> {
     let colors = Unconverted;
     let reading = Reading::new(Purpose::Objects, Units::METERS, &colors);
-    let read = Obj
-        .read(&Input::file(path), &Obj.options(), &reading)
-        .unwrap();
+    let mut options = Obj.options();
+    options.insert(OUTSIDE.into(), Value::Bool(true));
+    let read = Obj.read(&Input::file(path), &options, &reading).unwrap();
     // Blender writes its normal map under map_Bump, which reads as heights.
     let said = |w: &Diagnostic| w.message.contains("its name says a normal map");
     assert!(read.warnings.iter().all(said), "{:?}", read.warnings);

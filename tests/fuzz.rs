@@ -8,28 +8,32 @@ mod corpus;
 mod files;
 #[path = "common/random.rs"]
 mod random;
-use kinogaki_obj::obj::{
-    Limits, Obj, ObjError, ReadOptions, mtl, parse, parse_with, read, to_bytes,
-};
+use kinogaki_obj::obj::{Obj, ObjError, ReadOptions, mtl, parse, parse_with, read, to_bytes};
+use kinogaki_studio_api::format::{ReadBudget, ReadLimits};
 use random::Random;
 
 fn outcome(result: Result<Obj, ObjError>) -> Result<Obj, String> {
     result.map_err(|error| match error {
         ObjError::Malformed(error) => format!("{error:?}"),
         ObjError::Io(error) => panic!("unexpected I/O error {error}"),
+        ObjError::Cancelled => panic!("never cancelled"),
     })
 }
 
 fn check(text: &[u8]) {
-    let limits = Limits {
-        line_bytes: 1 << 16,
-        ..Limits::default()
+    // Each read its own budget (clones share what was spent), lines up to
+    // 64 KiB.
+    let budget = || {
+        ReadBudget::new(ReadLimits {
+            allocation: 1 << 16,
+            ..ReadLimits::default()
+        })
     };
     let one = outcome(parse_with(
         text,
         ReadOptions {
             threads: 1,
-            limits,
+            budget: budget(),
             ..ReadOptions::default()
         },
     ));
@@ -38,7 +42,7 @@ fn check(text: &[u8]) {
         ReadOptions {
             threads: 6,
             chunk_bytes: 64,
-            limits,
+            budget: budget(),
             ..ReadOptions::default()
         },
     ));
@@ -49,7 +53,7 @@ fn check(text: &[u8]) {
             threads: 3,
             chunk_bytes: 32,
             block_bytes: 300,
-            limits,
+            budget: budget(),
         },
     ));
     // A streamed line-length limit is reported without a place; otherwise alike.

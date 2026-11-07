@@ -1,32 +1,21 @@
 //! MTL reading: one sequential pass (material libraries are small).
 use super::{MapOptions, Material, MaterialLibrary, TextureMap};
-use crate::obj::{
-    Limits, MalformedKind, ObjError,
-    error::{Fault, limit},
-    line::Line,
-};
-use std::{fs::File, io::Read, path::Path};
+use crate::obj::{MalformedKind, ObjError, error::Fault, line::Line};
+use std::{io, path::Path};
 
 /// Parse MTL text. Statements before the first `newmtl` have no material to
 /// belong to and are ignored.
 pub fn parse(text: &[u8]) -> Result<MaterialLibrary, ObjError> {
-    parse_with(text, &Limits::default())
+    library(text).map_err(|fault| fault.locate(text, 1).into())
 }
 
-pub fn parse_with(text: &[u8], limits: &Limits) -> Result<MaterialLibrary, ObjError> {
-    if text.len() as u64 > limits.input_bytes {
-        return Err(limit("input exceeds the size limit").into());
-    }
-    library(text, limits).map_err(|fault| fault.locate(text, 1).into())
-}
-
-/// Read an MTL file.
+/// Read an MTL file: a regular file alone, never a device or a pipe.
 pub fn read_file(path: impl AsRef<Path>) -> Result<MaterialLibrary, ObjError> {
-    let limits = Limits::default();
-    let file = File::open(path)?;
-    let mut text = Vec::new();
-    file.take(limits.input_bytes + 1).read_to_end(&mut text)?;
-    parse_with(&text, &limits)
+    let path = path.as_ref();
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a regular file").into());
+    }
+    parse(&std::fs::read(path)?)
 }
 
 /// The file names one `mtllib` value may mean: the whole value (names with
@@ -39,19 +28,12 @@ pub fn library_paths(value: &str) -> Vec<&str> {
     paths
 }
 
-fn library(text: &[u8], limits: &Limits) -> Result<MaterialLibrary, Fault> {
+fn library(text: &[u8]) -> Result<MaterialLibrary, Fault> {
     let mut library = MaterialLibrary::default();
     let mut at = 0;
     while at < text.len() {
         let stop =
             kinogaki_bytes::find(b'\n', &text[at..]).map_or(text.len(), |offset| at + offset);
-        if stop - at > limits.line_bytes {
-            return Err(Fault::new(
-                MalformedKind::Limit,
-                at,
-                "line exceeds the length limit",
-            ));
-        }
         let mut line = Line {
             bytes: text,
             at,

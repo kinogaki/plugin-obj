@@ -1,13 +1,13 @@
 # OBJ
 
-Wavefront OBJ and MTL as a format plugin for [Kinogaki Studio](https://github.com/kinogaki): an OBJ file reads as one standard Geometry of the public [studio-sdk](https://github.com/kinogaki/studio-sdk), its material libraries as MaterialX networks, and polygons and polylines write as one OBJ with the Materials they name as an MTL library beside it. The plugin holds the reader and writer themselves (`src/obj/`, which knows no SDK) and the conversion between their model and the SDK's values (`src/read.rs`, `src/write.rs`, `src/materials/`).
+Wavefront OBJ and MTL as a format plugin for [Kinogaki Studio](https://github.com/kinogaki): an OBJ file reads as one standard Geometry of the public [studio-sdk](https://github.com/kinogaki/studio-sdk), its material libraries as MaterialX networks, and polygons and polylines write as one OBJ with the Materials they name as an MTL library beside it. The plugin holds the reader and writer themselves (`src/obj/`, which uses nothing of the SDK but the read's budget) and the conversion between their model and the SDK's values (`src/read.rs`, `src/write.rs`, `src/materials/`).
 
 The library crate is `kinogaki-obj`; `plugin/` (`kinogaki-plugin-obj`) is the dylib Studio loads, `formats/obj.dylib`. Package `kinogaki.obj`, format `kinogaki.format.obj`.
 
 ## Reading
 
 - **Geometry:** polygons then polylines over the file's points, vertex `uv` and `N`, point `Cd` (the common `v x y z r g b` extension, read as sRGB), primitive `name` (by `o`, or by `g` with the Pieces option), `material` (`usemtl`) and primitive groups (`g`), placed from the file's units and up axis (options; Y up in metres by default) into the project's.
-- **Materials:** each `mtllib` beside the file read as MaterialX networks, one item before the geometry, keyed by the names `usemtl` gives (below). Texture maps are Image nodes reading the files beside the library, kept as paths, or embedded with **Embed Textures**. A file read from memory names no folder, so its libraries are left out, said.
+- **Materials:** each library `mtllib` names read once as MaterialX networks, one item before the geometry, keyed by the names `usemtl` gives (below). Texture maps are Image nodes reading the files the library names, kept as paths, or embedded with **Embed Textures**. Libraries and maps are reached through the SDK's `Named`: in the file's folder and below, unless **Read Files Outside the Folder** is on; regular files only, never a device or a pipe; what is out of reach is left out and listed in one warning. A file held in memory names nothing on disk, so its libraries are left out, said.
 
 ## Materials
 
@@ -66,7 +66,7 @@ Free-form geometry (`vp`, `curv`, `surf`...), display statements and unknown key
 
 Reading is parallel: a counting pass sizes every table once, then chunks split at line feeds parse on all cores into their own slices. Files stream through 32 MiB blocks, so reading overlaps parsing and memory holds about two blocks of text. Numbers parse bit-identically to `str::parse::<f64>`; writing uses the shortest spelling that reads back exactly, so `parse(to_bytes(obj)) == obj`. A 1M-face, 57 MiB file reads in about 13 ms and writes in about 13 ms on an M4 Max ([docs/BENCHMARKS.md](docs/BENCHMARKS.md)).
 
-Untrusted input is bounded by `Limits` (input size, records, corners, line length); malformed text fails with a `Malformed` error carrying its kind, line and column, never a panic, and the first error in file order is reported whatever the thread count.
+Untrusted input is bounded by the read's budget (`ReadOptions::budget`, the SDK's `ReadBudget`): each block's tables, sized from its counted records, are charged to it before they are made, a line longer than one of its allocations is refused, and its cancellation stops a read between blocks; corners stay below 2³², the offsets' width. Malformed text fails with a `Malformed` error carrying its kind, line and column, never a panic, and the first error in file order is reported whatever the thread count. The statements a file holds are read in linear time: a face's groups are its `g` run's, each run's names split once; skipped keywords are counted by a table.
 
 Its design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -76,6 +76,7 @@ Its design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - `tests/materials.rs`: every MTL statement and option above read into its network and written back as the same statement and values, the networks checked as MaterialX takes them, textures embedded and written beside, another model written through Standard Surface, and Blender's exports (`tests/fixtures/blender`, made by Blender 5.1.2 with `make.py` there) read and written back unchanged;
 - `tests/read.rs`, `write.rs`, `mtl.rs`: the reader and writer;
 - `tests/fuzz.rs`: mutated files never panic (`OBJ_FUZZ=100 cargo test -p kinogaki-obj --release --test fuzz` runs it longer);
+- `tests/hostile.rs`: the hostile files that once took the reader seconds to minutes, or reached outside the file's folder, read as Import reads (a 2 MiB stack and a budget): a face in 20,000 groups, 150,000 unknown keywords, a polygon of 300,000 corners, tables past the budget, libraries and maps out of the folder, a pipe, a library named 500 times;
 - `tests/luce_differential.rs`: the reader against luce-obj on a corpus; `tools/luce-oracle/refresh.sh` regenerates the expected results with the Luce toolchain.
 
 File ▸ Import and Export through the editor are Studio's workflows.

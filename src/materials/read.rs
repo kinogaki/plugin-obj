@@ -5,7 +5,8 @@ use super::{
     STANDARD_STATEMENTS, Statement, WEIGHTS, beside, sig,
 };
 use crate::obj::mtl::{Material, MaterialLibrary, TextureMap};
-use kinogaki_studio_api::geometry::image::{EmbeddedFile, ImageFile, ImageSource};
+use kinogaki_studio_api::format::files::Named;
+use kinogaki_studio_api::geometry::image::ImageSource;
 use kinogaki_studio_api::image_files::image_node;
 use kinogaki_studio_api::network::{NetworkSeed, NewNode};
 use kinogaki_studio_api::standard::ImportedMaterial;
@@ -16,11 +17,12 @@ use std::sync::Arc;
 /// How a library's maps are read.
 #[derive(Clone, Copy, Debug)]
 pub struct Maps<'a> {
-    /// The library's folder, which its maps' paths are relative to; none for
-    /// a library held in memory, whose paths stay as written.
+    /// What finds the files the maps name, and reads them in with Embed
+    /// Textures: the OBJ's.
+    pub named: &'a Named,
+    /// The library's folder, which its maps' paths are relative to; none:
+    /// the OBJ's.
     pub folder: Option<&'a Path>,
-    /// Whether the files the maps name are read in and embedded.
-    pub embed: bool,
     /// Whether `bump` and `map_Bump` hold normal maps, as Blender writes
     /// them, rather than heights, as MTL says (D19).
     pub normal_maps: bool,
@@ -73,8 +75,9 @@ enum Read {
 struct Build<'a, 'w> {
     seed: NetworkSeed,
     maps: Maps<'a>,
-    /// The Image node reading each file, by its path as written.
-    images: Vec<(String, usize)>,
+    /// The Image node reading each file, by its path as written; none for
+    /// one out of reach.
+    images: Vec<(String, Option<usize>)>,
     /// What was left out, in words (`map_Kd -blendu`, `sharpness`).
     left: Vec<String>,
     warnings: &'w mut Vec<Diagnostic>,
@@ -269,9 +272,10 @@ impl Build<'_, '_> {
             (Read::Float, None) => "ND_image_float",
             (Read::Vector, None) => "ND_image_vector3",
         };
-        let file = self.image(&map.path);
         let image = self.node(signature);
-        self.seed.wire(file, image_node::IMAGE, image, "file");
+        if let Some(file) = self.image(&map.path) {
+            self.seed.wire(file, image_node::IMAGE, image, "file");
+        }
         if o.clamp == Some(true) {
             for mode in ["uaddressmode", "vaddressmode"] {
                 self.set(image, mode, Value::Choice(Arc::from("clamp")));
@@ -329,33 +333,19 @@ impl Build<'_, '_> {
     }
 
     /// The Image node reading `path` (relative to the library's folder): one
-    /// a file, its colors as the file says.
-    fn image(&mut self, path: &str) -> usize {
+    /// a file, its colors as the file says; none for a file out of reach,
+    /// which `maps.named` says.
+    fn image(&mut self, path: &str) -> Option<usize> {
         if let Some((_, at)) = self.images.iter().find(|(p, _)| p == path) {
             return *at;
         }
-        let whole = match self.maps.folder {
-            Some(folder) => folder.join(path),
-            None => path.into(),
-        };
-        let mut file = ImageFile::Path(Arc::from(whole.display().to_string()));
-        if self.maps.embed {
-            match std::fs::read(&whole) {
-                Ok(bytes) => {
-                    let name =
-                        (whole.file_name()).map_or_else(|| path.into(), |n| n.to_string_lossy());
-                    file = ImageFile::Embedded(EmbeddedFile::new(&name, bytes));
-                }
-                Err(e) => self.warnings.push(Diagnostic::warning(format!(
-                    "{}: {e}, kept as a path",
-                    whole.display()
-                ))),
-            }
-        }
-        let stem = Path::new(path).file_stem();
-        let name = stem.map_or_else(|| "Image".into(), |s| s.to_string_lossy());
-        let source = ImageSource::new(file, Default::default());
-        let at = self.seed.node(image_node::reading(&source).named(name));
+        let file = self.maps.named.image(path, self.maps.folder);
+        let at = file.map(|file| {
+            let stem = Path::new(path).file_stem();
+            let name = stem.map_or_else(|| "Image".into(), |s| s.to_string_lossy());
+            let source = ImageSource::new(file, Default::default());
+            self.seed.node(image_node::reading(&source).named(name))
+        });
         self.images.push((path.to_owned(), at));
         at
     }

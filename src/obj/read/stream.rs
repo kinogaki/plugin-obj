@@ -10,11 +10,12 @@ use std::{
 
 pub fn read<R: Read + Send>(reader: R, options: ReadOptions) -> Result<Obj, ObjError> {
     let block = options.block_bytes.max(1);
+    let line_bytes = options.line_bytes();
     let mut builder = Builder::new(options);
     std::thread::scope(|scope| {
         let (full_sender, full) = sync_channel(1);
         let (empty, empty_receiver) = channel();
-        scope.spawn(move || produce(reader, block, options, full_sender, empty_receiver));
+        scope.spawn(move || produce(reader, block, line_bytes, full_sender, empty_receiver));
         // Returning early drops `full`, which stops the producer.
         while let Ok(message) = full.recv() {
             let buffer: Vec<u8> = message?;
@@ -26,17 +27,16 @@ pub fn read<R: Read + Send>(reader: R, options: ReadOptions) -> Result<Obj, ObjE
 }
 
 /// Send blocks of whole lines (the last may lack a final line feed) until
-/// the input ends, an error occurs or the receiver hangs up.
+/// the input ends, an error occurs or the receiver hangs up; a line longer
+/// than `line_bytes` is an error.
 fn produce<R: Read>(
     mut reader: R,
     block: usize,
-    options: ReadOptions,
+    line_bytes: usize,
     full: SyncSender<Result<Vec<u8>, ObjError>>,
     empty: Receiver<Vec<u8>>,
 ) {
-    let limits = options.limits;
     let mut carry: Vec<u8> = Vec::new();
-    let mut total: u64 = 0;
     loop {
         let mut buffer = empty.try_recv().unwrap_or_default();
         buffer.clear();
@@ -53,16 +53,12 @@ fn produce<R: Read>(
                         ended = true;
                         break;
                     }
-                    Ok(count) => total += count as u64,
+                    Ok(_) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
                     Err(error) => {
                         let _ = full.send(Err(error.into()));
                         return;
                     }
-                }
-                if total > limits.input_bytes {
-                    let _ = full.send(Err(limit("input exceeds the size limit").into()));
-                    return;
                 }
             }
             if ended {
@@ -74,7 +70,7 @@ fn produce<R: Read>(
                     buffer.truncate(at + 1);
                     break;
                 }
-                None if buffer.len() > limits.line_bytes => {
+                None if buffer.len() > line_bytes => {
                     let _ = full.send(Err(limit("line exceeds the length limit").into()));
                     return;
                 }

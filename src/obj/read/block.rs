@@ -15,10 +15,10 @@ use super::{
     count::{self, Counts},
 };
 use crate::obj::{
-    Elements, MalformedKind, NONE, Obj, ReadOptions, Run, Skipped,
-    error::{Fault, Malformed, limit},
+    Elements, NONE, Obj, ObjError, ReadOptions, Run, Skipped, error::limit, options::CORNERS,
     parallel,
 };
+use std::collections::HashMap;
 
 /// An [`Obj`] under construction, fed one block at a time.
 pub struct Builder {
@@ -27,7 +27,8 @@ pub struct Builder {
     threads: usize,
     /// Line feeds in the blocks read so far.
     newlines: u64,
-    bytes: u64,
+    /// Each skipped keyword's place in `obj.skipped`.
+    skipped: HashMap<String, usize>,
     face_texcoords: bool,
     face_normals: bool,
     line_texcoords: bool,
@@ -37,10 +38,10 @@ impl Builder {
     pub fn new(options: ReadOptions) -> Self {
         Self {
             obj: Obj::default(),
-            threads: crate::obj::limits::thread_count(options.threads),
+            threads: crate::obj::options::thread_count(options.threads),
             options,
             newlines: 0,
-            bytes: 0,
+            skipped: HashMap::new(),
             face_texcoords: false,
             face_normals: false,
             line_texcoords: false,
@@ -48,19 +49,15 @@ impl Builder {
     }
 
     /// Parse `text`, which must end at a line feed unless it is the last block.
-    pub fn block(&mut self, text: &[u8]) -> Result<(), Malformed> {
-        let limits = self.options.limits;
-        self.bytes += text.len() as u64;
-        if self.bytes > limits.input_bytes {
-            return Err(limit("input exceeds the size limit"));
-        }
+    pub fn block(&mut self, text: &[u8]) -> Result<(), ObjError> {
+        self.options.budget.check()?;
         let ranges = split(text, self.threads, self.options.chunk_bytes);
         let counts = parallel::map(ranges.clone(), self.threads, |(start, end)| {
             count::count(&text[start..end])
         });
         let mut total = Counts::default();
         counts.iter().for_each(|c| total.add(c));
-        self.check_budget(&total)?;
+        self.charge(&total)?;
         let first_line = self.newlines + 1;
         let obj = &mut self.obj;
         let old = Bases {
@@ -125,7 +122,7 @@ impl Builder {
                     corner_normals: take(&mut corner_normals, keep_n),
                 },
                 bases,
-                limits,
+                line_bytes: self.options.line_bytes(),
             });
             face_bases.push(faces_before);
             bases.positions += c.positions;
@@ -136,13 +133,24 @@ impl Builder {
         }
         let extras = parallel::map(jobs, self.threads, chunk::parse);
         if let Some(fault) = extras.iter().find_map(|e| e.fault.clone()) {
-            return Err(fault.locate(text, first_line));
+            return Err(fault.locate(text, first_line).into());
         }
+        self.options.budget.check()?;
 
         let mut position_base = old.positions;
+        let mut first_seen = Vec::new();
         for ((e, c), faces_before) in extras.into_iter().zip(&counts).zip(face_bases) {
-            self.merge(e, position_base, faces_before, text, first_line)?;
+            self.merge(e, position_base, faces_before, &mut first_seen)?;
             position_base += c.positions;
+        }
+        // Each keyword skipped for the first time, given its line: one
+        // pass over the block for all of them.
+        first_seen.sort_unstable();
+        let (mut line, mut from) = (first_line, 0);
+        for (at, skipped) in first_seen {
+            line += kinogaki_bytes::count(b'\n', &text[from..at]) as u64;
+            from = at;
+            self.obj.skipped[skipped].first_line = line;
         }
         let positions = self.obj.positions.len();
         if !self.obj.weights.is_empty() {
@@ -155,38 +163,35 @@ impl Builder {
         Ok(())
     }
 
-    fn check_budget(&self, total: &Counts) -> Result<(), Malformed> {
-        let limits = &self.options.limits;
+    /// Charges the tables `total` counts to the budget before they are
+    /// made, and refuses more corners than 32-bit offsets reach.
+    fn charge(&self, total: &Counts) -> Result<(), ObjError> {
         let obj = &self.obj;
-        let elements = obj.faces.len() + obj.lines.len() + obj.points.len() + total.faces;
         let corners = obj.faces.positions.len()
             + obj.lines.positions.len()
             + obj.points.positions.len()
             + total.corners;
-        if obj.positions.len() + total.positions > limits.vertices
-            || obj.texcoords.len() + total.texcoords > limits.vertices
-            || obj.normals.len() + total.normals > limits.vertices
-        {
-            return Err(limit("too many vertex records"));
+        if corners > CORNERS {
+            return Err(limit("too many corners").into());
         }
-        if elements > limits.elements {
-            return Err(limit("too many elements"));
-        }
-        if corners > limits.corners || corners >= u32::MAX as usize {
-            return Err(limit("too many corners"));
-        }
-        Ok(())
+        // Positions, vt and vn are three f64s; a face its end; a corner
+        // its position, vt and vn.
+        let vertices = (total.positions + total.texcoords + total.normals) as u64;
+        let bytes = (vertices.saturating_mul(24))
+            .saturating_add((total.faces as u64).saturating_mul(4))
+            .saturating_add((total.corners as u64).saturating_mul(12));
+        Ok(self.options.budget.allocate(bytes)?)
     }
 
-    /// Append one chunk's collected records.
+    /// Append one chunk's collected records; each keyword skipped for the
+    /// first time is added to `first_seen` by its byte offset, for its line.
     fn merge(
         &mut self,
         e: Extras,
         position_base: usize,
         faces_before: usize,
-        text: &[u8],
-        first_line: u64,
-    ) -> Result<(), Malformed> {
+        first_seen: &mut Vec<(usize, usize)>,
+    ) -> Result<(), ObjError> {
         let obj = &mut self.obj;
         let positions = obj.positions.len();
         if !e.weights.is_empty() {
@@ -225,16 +230,15 @@ impl Builder {
         obj.material_libraries.extend(e.libraries);
         for (keyword, count, at) in e.skipped {
             let keyword = String::from_utf8_lossy(&keyword).into_owned();
-            match obj.skipped.iter_mut().find(|s| s.keyword == keyword) {
-                Some(entry) => entry.count += count,
+            match self.skipped.get(&keyword) {
+                Some(&entry) => obj.skipped[entry].count += count,
                 None => {
-                    let line = Fault::new(MalformedKind::Syntax, at, "")
-                        .locate(text, first_line)
-                        .line;
+                    self.skipped.insert(keyword.clone(), obj.skipped.len());
+                    first_seen.push((at, obj.skipped.len()));
                     obj.skipped.push(Skipped {
                         keyword,
                         count,
-                        first_line: line,
+                        first_line: 0,
                     });
                 }
             }
@@ -242,15 +246,11 @@ impl Builder {
         self.face_texcoords |= e.face_texcoords;
         self.face_normals |= e.face_normals;
         self.line_texcoords |= e.line_texcoords;
-        let limits = &self.options.limits;
         let obj = &self.obj;
-        if obj.faces.len() + obj.lines.len() + obj.points.len() > limits.elements {
-            return Err(limit("too many elements"));
-        }
         let corners =
             obj.faces.positions.len() + obj.lines.positions.len() + obj.points.positions.len();
-        if corners > limits.corners {
-            return Err(limit("too many corners"));
+        if corners > CORNERS {
+            return Err(limit("too many corners").into());
         }
         Ok(())
     }

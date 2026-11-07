@@ -1,9 +1,12 @@
-//! Reading: records, references, statements, errors with positions, limits.
+//! Reading: records, references, statements, errors with positions, the
+//! read's budget.
 #[path = "common/files.rs"]
 mod files;
 use kinogaki_obj::obj::{
-    Limits, MalformedKind, NONE, Obj, ObjError, ReadOptions, Run, parse, parse_with, read_file_with,
+    MalformedKind, NONE, Obj, ObjError, ReadOptions, Run, parse, parse_with, read_file_with,
 };
+use kinogaki_studio_api::CancelToken;
+use kinogaki_studio_api::format::{ReadBudget, ReadLimits};
 
 fn malformed(text: &str) -> kinogaki_obj::obj::Malformed {
     match parse(text.as_bytes()) {
@@ -257,38 +260,24 @@ fn errors_are_the_first_in_file_order_on_any_thread_count() {
 }
 
 #[test]
-fn limits_bound_every_table() {
+fn the_budget_bounds_every_table_and_line_and_stops_a_cancelled_read() {
     let text = files::chunked(40);
-    let read = |limits: Limits| {
-        parse_with(
-            &text,
-            ReadOptions {
-                limits,
-                ..ReadOptions::default()
-            },
-        )
+    let read = |limits: ReadLimits| {
+        let options = ReadOptions {
+            budget: ReadBudget::new(limits),
+            ..ReadOptions::default()
+        };
+        parse_with(&text, options)
     };
-    let base = Limits::default();
+    let base = ReadLimits::default();
     assert!(read(base).is_ok());
     for limits in [
-        Limits {
-            input_bytes: 1000,
+        ReadLimits {
+            total: 1000,
             ..base
         },
-        Limits {
-            vertices: 1000,
-            ..base
-        },
-        Limits {
-            elements: 1000,
-            ..base
-        },
-        Limits {
-            corners: 1000,
-            ..base
-        },
-        Limits {
-            line_bytes: 10,
+        ReadLimits {
+            allocation: 1000,
             ..base
         },
     ] {
@@ -299,6 +288,34 @@ fn limits_bound_every_table() {
             "{limits:?}: {error}"
         );
     }
+    // A line longer than one allocation, in memory and streamed.
+    let long = format!("o {}\n", "x".repeat(100));
+    let small = || ReadOptions {
+        budget: ReadBudget::new(ReadLimits {
+            allocation: 64,
+            ..base
+        }),
+        ..ReadOptions::default()
+    };
+    for read in [
+        parse_with(long.as_bytes(), small()),
+        kinogaki_obj::obj::read(long.as_bytes(), small()),
+    ] {
+        assert_eq!(
+            read.unwrap_err().malformed().unwrap().kind,
+            MalformedKind::Limit
+        );
+    }
+    let token = CancelToken::default();
+    token.cancel();
+    let cancelled = ReadOptions {
+        budget: ReadBudget::default().cancelled_by(token),
+        ..ReadOptions::default()
+    };
+    assert!(matches!(
+        parse_with(&text, cancelled),
+        Err(ObjError::Cancelled)
+    ));
 }
 
 #[test]
@@ -326,14 +343,14 @@ fn streamed_files_read_like_text_in_memory() {
     bad.extend_from_slice(b"v 1 2\n");
     std::fs::write(&path, &bad).unwrap();
     let lines = text.iter().filter(|&&b| b == b'\n').count() as u64;
-    let options = ReadOptions {
+    let options = || ReadOptions {
         block_bytes: 5000,
         ..ReadOptions::default()
     };
-    let error = read_file_with(&path, options).unwrap_err();
+    let error = read_file_with(&path, options()).unwrap_err();
     assert_eq!(error.malformed().unwrap().line, lines + 1);
     assert!(matches!(
-        read_file_with(directory.join("missing.obj"), options),
+        read_file_with(directory.join("missing.obj"), options()),
         Err(ObjError::Io(_))
     ));
     std::fs::remove_dir_all(&directory).unwrap();

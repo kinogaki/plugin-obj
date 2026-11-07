@@ -6,8 +6,10 @@ use std::{borrow::Cow, fmt, io};
 pub enum ObjError {
     /// The underlying reader or writer failed.
     Io(io::Error),
-    /// The text is not valid OBJ/MTL, or exceeds a [`crate::obj::Limits`] budget.
+    /// The text is not valid OBJ/MTL, or asks more than the read's budget.
     Malformed(Malformed),
+    /// The read's budget was cancelled.
+    Cancelled,
 }
 
 /// What kind of problem a [`Malformed`] error reports.
@@ -19,7 +21,8 @@ pub enum MalformedKind {
     Number,
     /// A reference is zero or names an element not declared before it.
     Index,
-    /// The input exceeds a configured budget.
+    /// The input asks more than the read's budget, or than the file's
+    /// 32-bit offsets reach.
     Limit,
     /// A recognised construct this library does not read (line continuations).
     Unsupported,
@@ -40,6 +43,7 @@ impl fmt::Display for ObjError {
         match self {
             Self::Io(error) => error.fmt(f),
             Self::Malformed(error) => error.fmt(f),
+            Self::Cancelled => f.write_str("cancelled"),
         }
     }
 }
@@ -62,7 +66,7 @@ impl std::error::Error for ObjError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
-            Self::Malformed(_) => None,
+            Self::Malformed(_) | Self::Cancelled => None,
         }
     }
 }
@@ -84,7 +88,17 @@ impl ObjError {
     pub fn malformed(&self) -> Option<&Malformed> {
         match self {
             Self::Malformed(error) => Some(error),
-            Self::Io(_) => None,
+            Self::Io(_) | Self::Cancelled => None,
+        }
+    }
+}
+
+/// The read's budget refusing: cancelled, or over a limit.
+impl From<kinogaki_studio_api::Error> for ObjError {
+    fn from(error: kinogaki_studio_api::Error) -> Self {
+        match error.is_cancelled() {
+            true => Self::Cancelled,
+            false => Self::Malformed(limit(error.message().to_owned())),
         }
     }
 }

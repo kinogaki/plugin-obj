@@ -4,10 +4,12 @@
 //! which the block merges in order afterwards.
 use crate::obj::line::{Line, separator};
 use crate::obj::{
-    Elements, Limits, MalformedKind, NONE, Run,
+    Elements, MalformedKind, NONE, Run,
     error::Fault,
     number::{delimiter, parse_index},
+    options::CORNERS,
 };
+use std::collections::HashMap;
 
 /// The chunk's parts of the tables, sized by the counting pass.
 pub struct Tables<'t> {
@@ -59,7 +61,8 @@ pub struct Job<'t> {
     pub end: usize,
     pub tables: Tables<'t>,
     pub bases: Bases,
-    pub limits: Limits,
+    /// The longest line read.
+    pub line_bytes: usize,
 }
 
 pub fn parse(job: Job<'_>) -> Extras {
@@ -67,7 +70,8 @@ pub fn parse(job: Job<'_>) -> Extras {
         text: job.text,
         tables: job.tables,
         bases: job.bases,
-        limits: job.limits,
+        line_bytes: job.line_bytes,
+        skipped: HashMap::new(),
         positions: 0,
         texcoords: 0,
         normals: 0,
@@ -85,7 +89,9 @@ struct Chunk<'t> {
     text: &'t [u8],
     tables: Tables<'t>,
     bases: Bases,
-    limits: Limits,
+    line_bytes: usize,
+    /// Each skipped keyword's place in `extras.skipped`.
+    skipped: HashMap<&'t [u8], usize>,
     // Records written so far, local to the chunk.
     positions: usize,
     texcoords: usize,
@@ -124,7 +130,7 @@ impl<'t> Chunk<'t> {
         while at < end {
             let stop =
                 kinogaki_bytes::find(b'\n', &bytes[at..end]).map_or(end, |offset| at + offset);
-            if stop - at > self.limits.line_bytes {
+            if stop - at > self.line_bytes {
                 return Err(Fault::new(
                     MalformedKind::Limit,
                     at,
@@ -145,7 +151,7 @@ impl<'t> Chunk<'t> {
         Ok(())
     }
 
-    fn record(&mut self, keyword: &[u8], line: &mut Line<'t>) -> Result<(), Fault> {
+    fn record(&mut self, keyword: &'t [u8], line: &mut Line<'t>) -> Result<(), Fault> {
         match keyword {
             b"v" => self.position(line),
             b"vt" => {
@@ -196,9 +202,12 @@ impl<'t> Chunk<'t> {
                 // render statements and unknown keywords alike are skipped and
                 // reported, never fatal.
                 let start = line.at - keyword.len();
-                match self.extras.skipped.iter_mut().find(|(k, ..)| k == keyword) {
-                    Some(entry) => entry.1 += 1,
-                    None => self.extras.skipped.push((keyword.to_vec(), 1, start)),
+                match self.skipped.get(keyword) {
+                    Some(&entry) => self.extras.skipped[entry].1 += 1,
+                    None => {
+                        self.skipped.insert(keyword, self.extras.skipped.len());
+                        self.extras.skipped.push((keyword.to_vec(), 1, start));
+                    }
                 }
                 Ok(())
             }
@@ -365,7 +374,7 @@ impl<'t> Chunk<'t> {
             };
             return Err(Fault::new(MalformedKind::Syntax, start, message));
         }
-        if elements.positions.len() > self.limits.corners {
+        if elements.positions.len() > CORNERS {
             return Err(Fault::new(MalformedKind::Limit, start, "too many corners"));
         }
         elements.offsets.push(elements.positions.len() as u32);

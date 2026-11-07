@@ -1,24 +1,29 @@
 //! An OBJ file to one [`Geometry`]: polygons then polylines over its points,
 //! vertex `uv` and `N`, point `Cd`, primitive `name`, `material` and groups,
 //! placed from the file's units and up axis into the project's; and the
-//! materials of the libraries it names (`mtllib`, beside it) as MaterialX
-//! networks, keyed by the names its `usemtl` statements give.
+//! materials of the libraries it names (`mtllib`, reached through the SDK's
+//! `Named`) as MaterialX networks, keyed by the names its `usemtl`
+//! statements give. The tables the file's records size are charged to the
+//! read's budget before they are made.
 use crate::materials::read::{Maps, materials};
 use crate::obj::mtl;
-use crate::obj::{Elements, NONE, Obj, Run, Skipped, run_at};
+use crate::obj::{Elements, NONE, Obj, ReadOptions, Run, Skipped};
 use crate::{COLORS, GEOMETRY, NORMAL_MAPS, UNITS, at_file};
 use kinogaki_studio_api::edit::editor::{Placed, gather};
-use kinogaki_studio_api::format::options;
+use kinogaki_studio_api::format::files::Named;
+use kinogaki_studio_api::format::{ReadBudget, options};
 use kinogaki_studio_api::geometry::{
-    Attribute, Attributes, Domain, Elements as Members, Geometry, Kind, Meaning, Primitives, Text,
-    Units, UpAxis, Vec3, Xform, names,
+    Attribute, Attributes, Column, Domain, Elements as Members, Geometry, Kind, Meaning,
+    Primitives, Text, Units, UpAxis, Vec3, Xform, names,
 };
 use kinogaki_studio_api::standard::Materials;
 use kinogaki_studio_api::{
     Diagnostic, Error, FileItem, FormatOptions, Imported, Input, Reading, Value, standard,
 };
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::Range;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Reads `input` as `options` say: a file on disk streamed, one in memory
 /// parsed whole.
@@ -28,9 +33,13 @@ pub(crate) fn read(
     reading: &Reading<'_>,
 ) -> Result<Imported, Error> {
     reading.check()?;
+    let options = ReadOptions {
+        budget: reading.budget.clone(),
+        ..ReadOptions::default()
+    };
     let obj = match input.path() {
-        Some(path) => at_file(input, crate::obj::read_file(path))?,
-        None => at_file(input, crate::obj::parse(&input.bytes()?))?,
+        Some(path) => at_file(input, crate::obj::read_file_with(path, options))?,
+        None => at_file(input, crate::obj::parse_with(&input.bytes()?, options))?,
     };
     reading.check()?;
     let wants = |ty| reading.wants.is_none_or(|w| w == ty);
@@ -49,12 +58,14 @@ pub(crate) fn read(
         warnings.extend(left);
     }
     if wants(standard::materials().id()) && !libraries.is_empty() {
+        let named = Named::new(input, chosen, reading);
         let maps = Maps {
+            named: &named,
             folder: None,
-            embed: options::option(chosen, options::EMBED, Value::bool)?,
             normal_maps: options::option(chosen, NORMAL_MAPS, Value::bool)?,
         };
-        let held = libraries_of(&libraries, input, maps, &mut warnings);
+        let held = libraries_of(&libraries, maps, &mut warnings);
+        warnings.extend(named.warnings());
         items.insert(
             0,
             FileItem::top("Materials", standard::materials().wrap(held)),
@@ -64,40 +75,29 @@ pub(crate) fn read(
 }
 
 /// The materials of the libraries `libraries` name (each `mtllib` value),
-/// read beside `input`, the first of a name kept; what couldn't be read
-/// said in `warnings`.
-fn libraries_of(
-    libraries: &[String],
-    input: &Input<'_>,
-    maps: Maps<'_>,
-    warnings: &mut Vec<Diagnostic>,
-) -> Materials {
+/// reached through `maps.named`, each file read once and the first
+/// material of a name kept; what couldn't be read said in `warnings`.
+fn libraries_of(libraries: &[String], maps: Maps<'_>, warnings: &mut Vec<Diagnostic>) -> Materials {
     let mut held = Materials::default();
-    let Some(folder) = input.path().and_then(Path::parent) else {
-        let names = libraries.join(", ");
-        warnings.push(Diagnostic::warning(format!(
-            "{input} is read from memory, so its material libraries ({names}) are left out"
-        )));
-        return held;
-    };
+    let mut read: HashSet<PathBuf> = HashSet::new();
+    let mut keys: HashSet<String> = HashSet::new();
     for value in libraries {
-        let found = mtl::library_paths(value)
-            .into_iter()
-            .map(|name| folder.join(name))
-            .find(|path| path.is_file());
-        let Some(path) = found else {
-            let at = folder.display();
-            warnings.push(Diagnostic::warning(format!(
-                "mtllib {value}: no such file in {at}"
-            )));
+        let found =
+            (mtl::library_paths(value).into_iter()).find_map(|name| maps.named.file(name, None));
+        let Some(path) = found else { continue };
+        if !read.insert(path.clone()) {
             continue;
-        };
-        let library = match mtl::read_file(&path) {
+        }
+        let library = maps
+            .named
+            .read(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| mtl::parse(&text).map_err(|e| format!("{}: {e}", path.display())));
+        let library = match library {
             Ok(library) => library,
-            Err(e) => {
-                let at = path.display();
+            Err(why) => {
                 warnings.push(Diagnostic::warning(format!(
-                    "{at}: {e}; its materials are left out"
+                    "{why}; its materials are left out"
                 )));
                 continue;
             }
@@ -109,13 +109,13 @@ fn libraries_of(
         let (made, left) = materials(&library, maps);
         warnings.extend(left);
         for m in made {
-            match held.materials.iter().any(|h| h.key == m.key) {
-                true => warnings.push(Diagnostic::warning(format!(
+            match keys.insert(m.key.clone()) {
+                false => warnings.push(Diagnostic::warning(format!(
                     "{}: a second material of that name, in {}, left out",
                     m.key,
                     path.display()
                 ))),
-                false => held.materials.push(m),
+                true => held.materials.push(m),
             }
         }
     }
@@ -189,18 +189,17 @@ fn geometry(
         attributes = attributes.with(Domain::Point, names::CD, column)?;
     }
     if keep_materials && !materials.is_empty() {
-        let column = text_column(&kept, &materials);
+        let column = text_column(&kept, &materials)?;
         attributes = attributes.with(Domain::Primitive, names::MATERIAL, column)?;
     }
     let pieces = if by_groups { &groups } else { &objects };
     if !pieces.is_empty() {
-        let column = text_column(&kept, pieces);
+        let column = text_column(&kept, pieces)?;
         attributes = attributes.with(Domain::Primitive, names::NAME, column)?;
     }
-    let primitives = kept.faces.len() + kept.lines.len();
-    for (name, members) in primitive_groups(&kept, &groups) {
-        let members = Members::from_indices(primitives, members)?;
-        attributes = attributes.with_group(Domain::Primitive, &name, members)?;
+    for (name, members) in primitive_groups(&kept, &groups, &reading.budget)? {
+        reading.check()?;
+        attributes = attributes.with_group(Domain::Primitive, name, members)?;
     }
     let value = Geometry::new(at.into(), table, attributes)?;
     let at = placement(chosen, reading.units)?;
@@ -243,9 +242,7 @@ fn kept_elements(faces: Elements, lines: Elements) -> Kept {
         line_from: Vec::with_capacity(lines.len()),
     };
     for face in 0..faces.len() {
-        let corners = faces.corners(face);
-        let repeats = (1..corners.len()).any(|i| corners[..i].contains(&corners[i]));
-        if !repeats {
+        if !repeats(faces.corners(face)) {
             push(&mut kept.faces, &faces, faces.range(face));
             kept.face_from.push(face as u32);
         }
@@ -322,36 +319,104 @@ fn corners<T: Copy>(
     out
 }
 
-/// The run of `runs` in effect for each kept primitive.
-fn runs_of<'a>(kept: &'a Kept, runs: &'a [Run<String>]) -> impl Iterator<Item = &'a str> + 'a {
-    let faces = (kept.face_from.iter()).map(|&f| run_at(runs, f, |r| r.face));
-    let lines = (kept.line_from.iter()).map(|&l| run_at(runs, l, |r| r.line));
-    faces
-        .chain(lines)
-        .map(|run| run.map_or("", |r| r.value.as_str()))
+/// Whether `corners` names a point twice: by pairs for a few, by sorting
+/// for many (a polygon of 300,000 corners).
+fn repeats(corners: &[u32]) -> bool {
+    if corners.len() <= 16 {
+        return (1..corners.len()).any(|i| corners[..i].contains(&corners[i]));
+    }
+    let mut sorted = corners.to_vec();
+    sorted.sort_unstable();
+    sorted.windows(2).any(|w| w[0] == w[1])
 }
 
-fn text_column(kept: &Kept, runs: &[Run<String>]) -> Attribute {
-    Attribute::text(Text::from_strs(runs_of(kept, runs)))
+/// The index in `runs` of the run in effect for element `index`, where
+/// `start` gives a run's first element of its kind.
+fn run_index<T>(runs: &[Run<T>], index: u32, start: impl Fn(&Run<T>) -> u32) -> Option<usize> {
+    runs.partition_point(|run| start(run) <= index)
+        .checked_sub(1)
+}
+
+/// Each kept primitive's run of `runs` as text: each run's value kept once
+/// in the table, however many primitives it covers.
+fn text_column(kept: &Kept, runs: &[Run<String>]) -> Result<Attribute, Error> {
+    let mut table: Vec<Arc<str>> = Vec::new();
+    let mut known: HashMap<&str, u32> = HashMap::new();
+    let slots: Vec<u32> = (runs.iter())
+        .map(|run| match run.value.as_str() {
+            "" => Text::NONE,
+            value => *known.entry(value).or_insert_with(|| {
+                table.push(value.into());
+                (table.len() - 1) as u32
+            }),
+        })
+        .collect();
+    let slot = |at: Option<usize>| at.map_or(Text::NONE, |at| slots[at]);
+    let faces = (kept.face_from.iter()).map(|&f| slot(run_index(runs, f, |r| r.face)));
+    let lines = (kept.line_from.iter()).map(|&l| slot(run_index(runs, l, |r| r.line)));
+    let indices: Vec<u32> = faces.chain(lines).collect();
+    Ok(Attribute::text(Text::new(
+        Column::new(indices),
+        table.into(),
+    )?))
 }
 
 /// Members of every `g` name, leaving out what a group can't be called (a
-/// hidden `.name`, too long) and the names attributes use.
-fn primitive_groups(kept: &Kept, runs: &[Run<String>]) -> BTreeMap<String, Vec<u32>> {
-    let mut groups: BTreeMap<String, Vec<u32>> = BTreeMap::new();
-    for (primitive, value) in runs_of(kept, runs).enumerate() {
-        for name in value.split(' ') {
-            let usable = names::check_name(name).is_ok() && !name.starts_with('.');
-            if usable {
-                groups
-                    .entry(name.to_owned())
-                    .or_default()
-                    .push(primitive as u32);
+/// hidden `.name`, too long) and the names attributes use: each run's names
+/// split once, its members the kept primitives it covers. Each group's
+/// members are charged to `budget` before they are made.
+fn primitive_groups<'a>(
+    kept: &Kept,
+    runs: &'a [Run<String>],
+    budget: &ReadBudget,
+) -> Result<BTreeMap<&'a str, Members>, Error> {
+    let faces = kept.faces.len() as u32;
+    let count = (kept.faces.len() + kept.lines.len()) as u32;
+    // The kept primitives from a run's first element of a kind to the
+    // next run's.
+    let span = |from: &[u32], start: u32, end: Option<u32>, base: u32| {
+        let at = |first: u32| from.partition_point(|&f| f < first) as u32 + base;
+        at(start)..end.map_or(from.len() as u32 + base, at)
+    };
+    let mut ranges: BTreeMap<&str, Vec<Range<u32>>> = BTreeMap::new();
+    for (at, run) in runs.iter().enumerate() {
+        let next = runs.get(at + 1);
+        let covered = [
+            span(&kept.face_from, run.face, next.map(|n| n.face), 0),
+            span(&kept.line_from, run.line, next.map(|n| n.line), faces),
+        ];
+        for name in run.value.split(' ') {
+            if names::check_name(name).is_ok() && !name.starts_with('.') {
+                (ranges.entry(name).or_default())
+                    .extend(covered.iter().filter(|r| !r.is_empty()).cloned());
             }
         }
     }
-    groups
+    let mut groups = BTreeMap::new();
+    for (name, ranges) in ranges {
+        let members: u64 = ranges.iter().map(|r| u64::from(r.end - r.start)).sum();
+        let words = count.div_ceil(64) as usize;
+        let set = match members.saturating_mul(16) < u64::from(count) {
+            true => {
+                budget.allocate(members.saturating_mul(4))?;
+                Members::from_indices(count as usize, ranges.into_iter().flatten())?
+            }
+            false => {
+                let mut bits = budget.vec::<u64>(words)?;
+                bits.resize(words, 0);
+                for member in ranges.into_iter().flatten() {
+                    bits[member as usize / 64] |= 1 << (member % 64);
+                }
+                Members::from_bits(count as usize, Column::new(bits))?
+            }
+        };
+        groups.insert(name, set);
+    }
+    Ok(groups)
 }
+
+/// How many kinds of skipped statement a warning names.
+const LISTED: usize = 16;
 
 /// One warning for what the table leaves out, or none.
 fn left_out(faces: usize, lines: usize, points: usize, skipped: &[Skipped]) -> Vec<Diagnostic> {
@@ -366,10 +431,14 @@ fn left_out(faces: usize, lines: usize, points: usize, skipped: &[Skipped]) -> V
         parts.push(format!("{points} point records"));
     }
     parts.extend(
-        skipped
-            .iter()
-            .map(|s| format!("{} `{}` statements", s.count, s.keyword)),
+        (skipped.iter().take(LISTED)).map(|s| format!("{} `{}` statements", s.count, s.keyword)),
     );
+    if skipped.len() > LISTED {
+        parts.push(format!(
+            "{} other kinds of statement",
+            skipped.len() - LISTED
+        ));
+    }
     match parts.is_empty() {
         true => Vec::new(),
         false => vec![Diagnostic::warning(format!(

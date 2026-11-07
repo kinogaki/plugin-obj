@@ -51,7 +51,7 @@ pub fn write_file(
 pub fn write_with(obj: &Obj, mut out: impl Write, options: &WriteOptions) -> Result<(), ObjError> {
     obj.validate()
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
-    let threads = crate::obj::limits::thread_count(options.threads);
+    let threads = crate::obj::options::thread_count(options.threads);
     let mut text = Vec::new();
     if let Some(comment) = &options.comment {
         for line in comment.lines() {

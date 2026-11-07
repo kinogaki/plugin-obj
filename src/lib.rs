@@ -5,7 +5,7 @@
 //! Materials they name as an MTL library beside it. It owns the format; the
 //! object a read value lands in adopts it (Mesh's, any kind's that takes
 //! geometry). The files themselves are read and written by [`obj`], which
-//! knows no SDK.
+//! uses nothing of the SDK but the read's budget.
 pub mod materials;
 pub mod obj;
 mod read;
@@ -84,6 +84,7 @@ impl FileFormat for Obj {
             ("uvs".to_owned(), Value::Bool(true)),
             ("materials".to_owned(), Value::Bool(true)),
             (options::EMBED.to_owned(), Value::Bool(false)),
+            (options::OUTSIDE.to_owned(), Value::Bool(false)),
             (NORMAL_MAPS.to_owned(), Value::Bool(false)),
         ])
     }
@@ -118,8 +119,9 @@ impl FileFormat for Obj {
         if purpose == Purpose::Value {
             return schema;
         }
-        let embed = options::option(chosen, options::EMBED, Value::bool).unwrap_or(false);
-        let schema = options::embed(schema, embed);
+        let on = |name| options::option(chosen, name, Value::bool).unwrap_or(false);
+        let schema = options::embed(schema, on(options::EMBED));
+        let schema = options::outside(schema, on(options::OUTSIDE));
         let words = "map_Bump bump Blender normal";
         toggle(schema, NORMAL_MAPS, "Bump Maps as Normal Maps", words)
     }
@@ -142,5 +144,8 @@ fn at_file<T>(
     file: impl std::fmt::Display,
     result: Result<T, crate::obj::ObjError>,
 ) -> Result<T, Error> {
-    result.map_err(|e| Error::invalid(format!("{file}: {e}")))
+    result.map_err(|e| match e {
+        crate::obj::ObjError::Cancelled => Error::cancelled(),
+        e => Error::invalid(format!("{file}: {e}")),
+    })
 }
