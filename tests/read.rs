@@ -7,6 +7,7 @@ use kinogaki_obj::obj::{
 };
 use kinogaki_studio_api::CancelToken;
 use kinogaki_studio_api::format::{ReadBudget, ReadLimits};
+use kinogaki_studio_api_testing::workers;
 
 fn malformed(text: &str) -> kinogaki_obj::obj::Malformed {
     match parse(text.as_bytes()) {
@@ -227,9 +228,9 @@ fn errors_are_the_first_in_file_order_on_any_thread_count() {
     let mut text = files::chunked(160);
     let lines = text.iter().filter(|&&b| b == b'\n').count() as u64;
     text.extend_from_slice(b"f 1 2 999999\n");
-    for (threads, chunk_bytes) in [(1, 256 << 10), (8, 4096), (16, 512)] {
+    workers::install(8);
+    for chunk_bytes in [256 << 10, 4096, 512] {
         let options = ReadOptions {
-            threads,
             chunk_bytes,
             ..ReadOptions::default()
         };
@@ -245,7 +246,6 @@ fn errors_are_the_first_in_file_order_on_any_thread_count() {
     text.extend_from_slice(&files::chunked(100));
     text.extend_from_slice(b"f 0 0 0\n");
     let options = ReadOptions {
-        threads: 8,
         chunk_bytes: 1024,
         ..ReadOptions::default()
     };
@@ -354,4 +354,41 @@ fn streamed_files_read_like_text_in_memory() {
         Err(ObjError::Io(_))
     ));
     std::fs::remove_dir_all(&directory).unwrap();
+}
+
+/// A read cancelled while its file streams in stops at the next block,
+/// whatever its workers were doing.
+#[test]
+fn a_read_cancelled_while_it_streams_stops() {
+    struct Cancelling {
+        text: Vec<u8>,
+        at: usize,
+        token: CancelToken,
+    }
+    impl std::io::Read for Cancelling {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            // Once the first block is given, the read is no longer wanted.
+            if self.at > 0 {
+                self.token.cancel();
+            }
+            let n = out.len().min(self.text.len() - self.at);
+            out[..n].copy_from_slice(&self.text[self.at..self.at + n]);
+            self.at += n;
+            Ok(n)
+        }
+    }
+    workers::install(4);
+    let token = CancelToken::default();
+    let reader = Cancelling {
+        text: files::chunked(200),
+        at: 0,
+        token: token.clone(),
+    };
+    let options = ReadOptions {
+        budget: ReadBudget::default().cancelled_by(token),
+        block_bytes: 4096,
+        chunk_bytes: 512,
+    };
+    let read = kinogaki_obj::obj::read(reader, options);
+    assert!(matches!(read, Err(ObjError::Cancelled)), "{read:?}");
 }

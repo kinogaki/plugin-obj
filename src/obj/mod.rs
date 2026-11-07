@@ -4,12 +4,14 @@
 //! polygons, polylines and point sets with their `vt`/`vn` references, and the
 //! object, group, material and smoothing statements as runs over the elements.
 //! It depends on nothing of the SDK but the read's budget, which a read
-//! charges the tables a file's records size to; the plugin converts it to
-//! and from the standard `Geometry`.
+//! charges the tables a file's records size to, the SDK's workers, which
+//! its parallel passes run on (it starts no thread of its own), and
+//! `files::replace`, which writes its files whole; the plugin converts it
+//! to and from the standard `Geometry`.
 //!
 //! Reading splits the text into chunks at line feeds and parses them in
 //! parallel after a counting pass that sizes every table once; files stream
-//! through blocks so reading overlaps parsing. Numbers parse bit-identically
+//! through blocks, the next read while one is parsed. Numbers parse bit-identically
 //! to `str::parse::<f64>`, and writing uses the shortest spelling that reads
 //! back exactly, so `parse(to_bytes(obj)) == obj`.
 //!
@@ -19,14 +21,12 @@
 //! let text = kinogaki_obj::obj::to_bytes(&obj).unwrap();
 //! assert_eq!(kinogaki_obj::obj::parse(&text).unwrap(), obj);
 //! ```
-mod atomic;
 mod error;
 mod line;
 mod model;
 pub mod mtl;
 mod number;
 mod options;
-mod parallel;
 mod read;
 mod validate;
 mod write;

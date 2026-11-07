@@ -31,10 +31,20 @@ threads); `parse 1 thread`. Times in ms, min / median.
 That is about 4.6 GB/s from file and 6 GB/s from memory on 16 cores, and
 0.65 GB/s on one.
 
+The reader runs on the SDK's workers, the bench installing the SDK testing
+support's (one thread a processor, as a host installs its own). Measured
+interleaved against the reader's former threads of its own on 2026-11-07,
+the quietest pair at load 58–67 (15 runs each), the same within noise:
+
+| File | read_file, own threads | read_file, SDK workers | parse, own threads | parse, SDK workers |
+| --- | --- | --- | --- | --- |
+| quad1000 | 12.4 / 13.7 | 12.2 / 13.6 | 10.3 / 10.8 | 9.9 / 11.3 |
+| quad1000_uvn | 26.9 / 29.3 | 26.9 / 28.0 | 18.2 / 20.8 | 17.3 / 18.3 |
+
 ## Writing
 
-`to_bytes` (into memory) and `write_file` (atomic: temporary file, fsync,
-rename). Times in ms, min / median.
+`to_bytes` (into memory) and `write_file` (whole or not at all, the SDK's
+`files::replace`: a new file beside, fsync, rename). Times in ms, min / median.
 
 | File | Text written | to_bytes | write_file |
 | --- | --- | --- | --- |

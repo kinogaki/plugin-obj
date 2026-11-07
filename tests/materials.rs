@@ -5,7 +5,7 @@ use kinogaki_obj::Obj;
 use kinogaki_obj::obj::mtl::{self, Material, MaterialLibrary};
 use kinogaki_render_api::MaterialNetwork;
 use kinogaki_render_api::material::mtlx::SIGNATURE;
-use kinogaki_studio_api::format::options::{EMBED, OUTSIDE};
+use kinogaki_studio_api::format::options::EMBED;
 use kinogaki_studio_api::geometry::image::ImageFile;
 use kinogaki_studio_api::geometry::{Attribute, Domain, Geometry, Text, names};
 use kinogaki_studio_api::image_files::{IMAGE_NODE, image_source};
@@ -15,15 +15,8 @@ use kinogaki_studio_api::{
     Diagnostic, FileFormat, FileItem, FormatOptions, Input, Purpose, Reading, Units, Value, Writing,
 };
 use kinogaki_studio_api_testing::Unconverted;
-use std::path::{Path, PathBuf};
-
-/// A folder of this test's own.
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("kinogaki-obj-mtl-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
+use kinogaki_studio_api_testing::format::Scratch;
+use std::path::Path;
 
 /// A square naming material `key`.
 fn square(key: &str) -> Geometry {
@@ -58,7 +51,7 @@ fn read(path: &Path, set: &[(&str, Value)]) -> (Materials, Vec<Diagnostic>) {
 /// `library` written beside an OBJ naming its first material in a new
 /// folder, read with `set`.
 fn read_library(name: &str, library: &str, set: &[(&str, Value)]) -> (Materials, Vec<Diagnostic>) {
-    let dir = scratch(name);
+    let dir = Scratch::new(name);
     std::fs::write(dir.join("lib.mtl"), library).unwrap();
     let obj = "mtllib lib.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
     std::fs::write(dir.join("model.obj"), obj).unwrap();
@@ -198,7 +191,7 @@ fn every_statement_and_option_writes_back_as_it_was_read() {
             (m.name.as_str(), true)
         );
     }
-    let dir = scratch("every-written");
+    let dir = Scratch::new("every-written");
     let (written, warnings) = write(&dir, "every", &held);
     assert!(warnings.is_empty(), "{warnings:?}");
     let read = mtl::parse(EVERY.as_bytes()).unwrap();
@@ -350,7 +343,7 @@ impl kinogaki_studio_api::color::ColorService for Doubled {
 
 #[test]
 fn colors_read_into_the_working_space_and_write_out_of_it() {
-    let dir = scratch("colors");
+    let dir = Scratch::new("colors");
     let library = "newmtl Red\nKd 0.5 0.25 0.125\nKs 0.1 0.2 0.3\nd 0.5\n";
     std::fs::write(dir.join("lib.mtl"), library).unwrap();
     std::fs::write(dir.join("model.obj"), "mtllib lib.mtl\n").unwrap();
@@ -416,7 +409,7 @@ fn bump_maps_read_as_heights_or_as_normal_maps_as_told() {
     };
     assert_eq!(seed.nodes[normal].parameters["scale"], Value::Number(0.5));
     // Written back as MTL's normal map.
-    let (written, _) = write(&scratch("normals-written"), "n", &held);
+    let (written, _) = write(&Scratch::new("normals-written"), "n", &held);
     assert!(written.materials[0].map("norm").is_some());
 }
 
@@ -442,7 +435,7 @@ fn what_mtl_records_nowhere_is_left_out_and_said() {
             warning.message
         );
     }
-    let (written, _) = write(&scratch("left-written"), "a", &held);
+    let (written, _) = write(&Scratch::new("left-written"), "a", &held);
     let a = &written.materials[0];
     assert!(a.other.is_empty() && a.map("decal").is_none() && a.map("refl").is_none());
     assert!(a.map("map_Kd").unwrap().options.other.is_empty());
@@ -450,7 +443,7 @@ fn what_mtl_records_nowhere_is_left_out_and_said() {
 
 #[test]
 fn textures_embed_when_asked_and_write_beside_the_library() {
-    let dir = scratch("embed");
+    let dir = Scratch::new("embed");
     std::fs::write(dir.join("wood.png"), [1, 2, 3]).unwrap();
     std::fs::write(
         dir.join("lib.mtl"),
@@ -467,7 +460,7 @@ fn textures_embed_when_asked_and_write_beside_the_library() {
         (warnings.iter()).any(|w| w.message == "no such files: gone.png"),
         "{warnings:?}"
     );
-    let out = scratch("embed-written");
+    let out = Scratch::new("embed-written");
     let (written, _) = write(&out, "scene", &held);
     let a = &written.materials[0];
     assert_eq!(a.map("map_Kd").unwrap().path, "scene_textures/wood.png");
@@ -512,7 +505,7 @@ fn another_model_writes_through_standard_surface() {
         materials: vec![m],
         images: Vec::new(),
     };
-    let dir = scratch("translated");
+    let dir = Scratch::new("translated");
     let (written, warnings) = write(&dir, "gold", &held);
     assert!(warnings.is_empty(), "{warnings:?}");
     let gold: &Material = &written.materials[0];
@@ -525,15 +518,14 @@ fn another_model_writes_through_standard_surface() {
 }
 
 /// Every item of the OBJ at `path` (its materials first, then its geometry)
-/// read with the defaults, and files outside its folder read: a library
-/// written into a scratch folder names the fixtures' textures where they
-/// are.
+/// read with the defaults: a library written into a scratch folder names
+/// the fixtures' textures where they are.
 fn items(path: &Path) -> Vec<FileItem> {
     let colors = Unconverted;
     let reading = Reading::new(Purpose::Objects, Units::METERS, &colors);
-    let mut options = Obj.options();
-    options.insert(OUTSIDE.into(), Value::Bool(true));
-    let read = Obj.read(&Input::file(path), &options, &reading).unwrap();
+    let read = Obj
+        .read(&Input::file(path), &Obj.options(), &reading)
+        .unwrap();
     // Blender writes its normal map under map_Bump, which reads as heights.
     let said = |w: &Diagnostic| w.message.contains("its name says a normal map");
     assert!(read.warnings.iter().all(said), "{:?}", read.warnings);
@@ -547,7 +539,7 @@ fn blender_exports_write_back_unchanged() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/blender");
     for name in ["cube", "cube_pbr"] {
         let read = items(&fixtures.join(format!("{name}.obj")));
-        let dir = scratch(&format!("blender-{name}"));
+        let dir = Scratch::new(&format!("blender-{name}"));
         let file = dir.join(format!("{name}.obj"));
         let colors = Unconverted;
         let writing = Writing::new(Units::METERS, &colors);
@@ -597,7 +589,7 @@ fn blender_exports_write_back_unchanged() {
 #[test]
 #[ignore = "hand: a measurement, meaningful in release"]
 fn hand_run_a_thousand_materials_read_within_their_budget() {
-    let dir = scratch("thousand");
+    let dir = Scratch::new("thousand");
     let mut library = String::new();
     for n in 0..1000 {
         library += &format!(

@@ -14,7 +14,7 @@ pub fn parse(text: &[u8]) -> Result<Obj, ObjError> {
     parse_with(text, ReadOptions::default())
 }
 
-/// Parse OBJ text held in memory, on all of `options.threads`.
+/// Parse OBJ text held in memory, on the SDK's workers.
 pub fn parse_with(text: &[u8], options: ReadOptions) -> Result<Obj, ObjError> {
     let mut builder = block::Builder::new(options);
     builder.block(text)?;

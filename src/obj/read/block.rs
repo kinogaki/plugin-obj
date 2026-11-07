@@ -1,8 +1,8 @@
 //! A block is a run of whole lines read and parsed at once: the whole input
 //! for [`crate::obj::parse`], or one window of a stream. Each block is
 //!
-//! 1. split into chunks at line feeds, a few per thread;
-//! 2. counted in parallel ([`super::count`]);
+//! 1. split into chunks at line feeds;
+//! 2. counted in parallel, on the SDK's workers ([`super::count`]);
 //! 3. given its final table sizes, so every chunk gets disjoint slices;
 //! 4. parsed in parallel ([`super::chunk`]), each chunk resolving references
 //!    against the elements declared before each of its lines, as a sequential
@@ -16,15 +16,19 @@ use super::{
 };
 use crate::obj::{
     Elements, NONE, Obj, ObjError, ReadOptions, Run, Skipped, error::limit, options::CORNERS,
-    parallel,
 };
+use kinogaki_studio_api::geometry::parallel;
 use std::collections::HashMap;
+use std::sync::Mutex;
+
+/// The most chunks a block is split into: jobs enough for any machine's
+/// workers, each still far larger than what scheduling it costs.
+const MOST_CHUNKS: usize = 256;
 
 /// An [`Obj`] under construction, fed one block at a time.
 pub struct Builder {
     obj: Obj,
     options: ReadOptions,
-    threads: usize,
     /// Line feeds in the blocks read so far.
     newlines: u64,
     /// Each skipped keyword's place in `obj.skipped`.
@@ -38,7 +42,6 @@ impl Builder {
     pub fn new(options: ReadOptions) -> Self {
         Self {
             obj: Obj::default(),
-            threads: crate::obj::options::thread_count(options.threads),
             options,
             newlines: 0,
             skipped: HashMap::new(),
@@ -51,10 +54,12 @@ impl Builder {
     /// Parse `text`, which must end at a line feed unless it is the last block.
     pub fn block(&mut self, text: &[u8]) -> Result<(), ObjError> {
         self.options.budget.check()?;
-        let ranges = split(text, self.threads, self.options.chunk_bytes);
-        let counts = parallel::map(ranges.clone(), self.threads, |(start, end)| {
+        let ranges = split(text, self.options.chunk_bytes);
+        let counts = parallel::map(ranges.len(), |at| {
+            let (start, end) = ranges[at];
             count::count(&text[start..end])
         });
+        self.options.budget.check()?;
         let mut total = Counts::default();
         counts.iter().for_each(|c| total.add(c));
         self.charge(&total)?;
@@ -131,11 +136,21 @@ impl Builder {
             bases.corners += c.corners;
             faces_before += c.faces;
         }
-        let extras = parallel::map(jobs, self.threads, chunk::parse);
+        // Each job is taken once, by the worker given its index; a cancelled
+        // read parses no more chunks.
+        let jobs: Vec<Mutex<Option<Job>>> = jobs.into_iter().map(|j| Mutex::new(Some(j))).collect();
+        let budget = &self.options.budget;
+        let extras = parallel::map(jobs.len(), |at| {
+            let job = jobs[at].lock().unwrap_or_else(|e| e.into_inner()).take();
+            match (budget.cancel().is_cancelled(), job) {
+                (false, Some(job)) => chunk::parse(job),
+                _ => Extras::default(),
+            }
+        });
+        self.options.budget.check()?;
         if let Some(fault) = extras.iter().find_map(|e| e.fault.clone()) {
             return Err(fault.locate(text, first_line).into());
         }
-        self.options.budget.check()?;
 
         let mut position_base = old.positions;
         let mut first_seen = Vec::new();
@@ -295,10 +310,11 @@ fn append(elements: &mut Elements, more: Elements) {
     elements.positions.extend(more.positions);
 }
 
-/// Chunk ranges of `text`: about `least` bytes or more each, a few per
-/// thread, each ending just after a line feed (the last at the end of the text).
-pub fn split(text: &[u8], threads: usize, least: usize) -> Vec<(usize, usize)> {
-    let wanted = (text.len() / least.max(1)).clamp(1, (threads * 4).max(1));
+/// Chunk ranges of `text`: about `least` bytes or more each, at most
+/// [`MOST_CHUNKS`], each ending just after a line feed (the last at the end
+/// of the text).
+pub fn split(text: &[u8], least: usize) -> Vec<(usize, usize)> {
+    let wanted = (text.len() / least.max(1)).clamp(1, MOST_CHUNKS);
     let mut ranges = Vec::with_capacity(wanted);
     let mut start = 0;
     for at in 1..=wanted {
@@ -334,8 +350,9 @@ mod tests {
         let text: Vec<u8> = (0..200_000)
             .flat_map(|i| format!("v {i} 0 0\n").into_bytes())
             .collect();
-        for threads in [1, 3, 16] {
-            let ranges = split(&text, threads, 256 << 10);
+        for least in [1 << 10, 64 << 10, 256 << 10] {
+            let ranges = split(&text, least);
+            assert!(ranges.len() <= super::MOST_CHUNKS);
             assert_eq!(ranges.first().unwrap().0, 0);
             assert_eq!(ranges.last().unwrap().1, text.len());
             for pair in ranges.windows(2) {
@@ -343,8 +360,8 @@ mod tests {
                 assert_eq!(text[pair[0].1 - 1], b'\n');
             }
         }
-        assert_eq!(split(b"", 4, 1), vec![(0, 0)]);
-        assert_eq!(split(b"v 1 2 3", 4, 1), vec![(0, 7)]);
-        assert_eq!(split(b"a\nb\nc\n", 4, 1), vec![(0, 2), (2, 4), (4, 6)]);
+        assert_eq!(split(b"", 1), vec![(0, 0)]);
+        assert_eq!(split(b"v 1 2 3", 1), vec![(0, 7)]);
+        assert_eq!(split(b"a\nb\nc\n", 1), vec![(0, 2), (2, 4), (4, 6)]);
     }
 }

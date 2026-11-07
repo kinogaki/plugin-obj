@@ -10,6 +10,7 @@ mod files;
 mod random;
 use kinogaki_obj::obj::{Obj, ObjError, ReadOptions, mtl, parse, parse_with, read, to_bytes};
 use kinogaki_studio_api::format::{ReadBudget, ReadLimits};
+use kinogaki_studio_api_testing::workers;
 use random::Random;
 
 fn outcome(result: Result<Obj, ObjError>) -> Result<Obj, String> {
@@ -21,6 +22,7 @@ fn outcome(result: Result<Obj, ObjError>) -> Result<Obj, String> {
 }
 
 fn check(text: &[u8]) {
+    workers::install(6);
     // Each read its own budget (clones share what was spent), lines up to
     // 64 KiB.
     let budget = || {
@@ -32,7 +34,6 @@ fn check(text: &[u8]) {
     let one = outcome(parse_with(
         text,
         ReadOptions {
-            threads: 1,
             budget: budget(),
             ..ReadOptions::default()
         },
@@ -40,7 +41,6 @@ fn check(text: &[u8]) {
     let many = outcome(parse_with(
         text,
         ReadOptions {
-            threads: 6,
             chunk_bytes: 64,
             budget: budget(),
             ..ReadOptions::default()
@@ -50,7 +50,6 @@ fn check(text: &[u8]) {
     let streamed = outcome(read(
         text,
         ReadOptions {
-            threads: 3,
             chunk_bytes: 32,
             block_bytes: 300,
             budget: budget(),

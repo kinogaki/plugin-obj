@@ -4,8 +4,10 @@
 //! in its items, a clean error or a warning within a time bound.
 use kinogaki_obj::Obj;
 use kinogaki_studio_api::format::ReadLimits;
-use kinogaki_studio_api::format::options::{EMBED, OUTSIDE};
+use kinogaki_studio_api::format::options::EMBED;
 use kinogaki_studio_api::geometry::Domain;
+use kinogaki_studio_api::geometry::image::ImageFile;
+use kinogaki_studio_api::image_files::image_source;
 use kinogaki_studio_api::standard;
 use kinogaki_studio_api::{Error, FileFormat, FormatOptions, Imported, Input, Value};
 use kinogaki_studio_api_testing::read_hostile;
@@ -125,7 +127,7 @@ fn tables_past_the_budget_are_refused_before_they_are_made() {
 }
 
 #[test]
-fn libraries_and_maps_out_of_the_folder_are_left_unresolved() {
+fn libraries_and_maps_out_of_the_folder_are_read() {
     let dir = scratch("reach");
     std::fs::create_dir_all(dir.join("elsewhere")).unwrap();
     std::fs::write(
@@ -134,39 +136,43 @@ fn libraries_and_maps_out_of_the_folder_are_left_unresolved() {
     )
     .unwrap();
     std::fs::write(dir.join("elsewhere/far.png"), b"far").unwrap();
+    let absolute = dir.join("elsewhere/far.png").display().to_string();
     std::fs::write(
         dir.join("scene/lib.mtl"),
-        "newmtl near\nmap_Kd /etc/hosts\nmap_Ks ../elsewhere/far.png\nmap_Ns wood.png\n",
+        format!("newmtl near\nmap_Kd {absolute}\nmap_Ks ../elsewhere/far.png\nmap_Ns wood.png\n"),
     )
     .unwrap();
     std::fs::write(dir.join("scene/wood.png"), b"wood").unwrap();
     let obj = dir.join("scene/model.obj");
-    let libraries = "mtllib lib.mtl\nmtllib ../elsewhere/far.mtl\nmtllib /etc/hosts\n";
-    std::fs::write(&obj, triangles(libraries, 1)).unwrap();
+    std::fs::write(
+        &obj,
+        triangles("mtllib lib.mtl\nmtllib ../elsewhere/far.mtl\n", 1),
+    )
+    .unwrap();
     let read = read_file(&obj, &[(EMBED, true)]);
+    assert!(read.warnings.is_empty(), "{:?}", read.warnings);
     let held = standard::materials()
         .get(read.items[0].data.as_ref().unwrap())
         .unwrap();
     let keys: Vec<&str> = held.materials.iter().map(|m| m.key.as_str()).collect();
-    assert_eq!(keys, ["near"], "far's library is outside");
-    let inside = format!("{:?}", held.materials[0].inside);
-    assert!(inside.contains("wood") && !inside.contains("hosts") && !inside.contains("far"));
-    let outside = (read.warnings.iter())
-        .find(|w| w.message.contains("outside the folder"))
-        .expect("one warning lists them");
-    assert!(
-        outside
-            .message
-            .ends_with("../elsewhere/far.mtl, ../elsewhere/far.png, /etc/hosts"),
-        "{}",
-        outside.message
-    );
-    // Turned on, they are read, and the far library's own map too.
-    let anywhere = read_file(&obj, &[(EMBED, true), (OUTSIDE, true)]);
-    let held = standard::materials()
-        .get(anywhere.items[0].data.as_ref().unwrap())
-        .unwrap();
-    assert_eq!(held.materials.len(), 2);
+    assert_eq!(keys, ["near", "far"], "far's library is read where it is");
+    // Each map embedded, found by its absolute path or a parent folder.
+    let embedded = |m: usize| -> Vec<Vec<u8>> {
+        let nodes = &held.materials[m].inside.nodes;
+        let sources = nodes
+            .iter()
+            .filter_map(|n| image_source(&n.parameters).ok().flatten());
+        let bytes = sources.filter_map(|s| match s.file() {
+            ImageFile::Embedded(e) => Some(e.bytes().to_vec()),
+            ImageFile::Path(_) => None,
+        });
+        let mut bytes: Vec<Vec<u8>> = bytes.collect();
+        bytes.sort();
+        bytes.dedup();
+        bytes
+    };
+    assert_eq!(embedded(0), [b"far".to_vec(), b"wood".to_vec()]);
+    assert_eq!(embedded(1), [b"far".to_vec()]);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

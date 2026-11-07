@@ -7,8 +7,7 @@ use kinogaki_studio_api::{
     FileFormat, FileItem, FormatOptions, Input, Purpose, Reading, Value, Writing, standard,
 };
 use kinogaki_studio_api_testing::Unconverted;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use kinogaki_studio_api_testing::format::{Scratch, round_trip};
 
 const CUBE: &str = "\
 o a
@@ -31,18 +30,9 @@ f 1/1/1 3/3/1 2/2/1
 l 1 2 3
 ";
 
-/// `name` in a folder of its own: tests run in parallel, and two writing one
-/// path read each other's file half written.
-fn scratch(name: &str) -> PathBuf {
-    static CALLS: AtomicUsize = AtomicUsize::new(0);
-    let call = CALLS.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("kinogaki-obj-{}-{call}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir.join(name)
-}
-
 fn read(text: &str, name: &str, set: &[(&str, Value)], units: Units) -> Geometry {
-    let file = scratch(name);
+    let dir = Scratch::new("obj");
+    let file = dir.join(name);
     std::fs::write(&file, text).unwrap();
     let format = Obj;
     assert_eq!(format.id(), kinogaki_obj::format());
@@ -127,7 +117,8 @@ fn what_is_written_reads_back() {
     let value = read(CUBE, "out.obj", &[], Units::METERS);
     let format = Obj;
     let writer = format.writer().expect("it writes");
-    let file = scratch("written.obj");
+    let dir = Scratch::new("obj");
+    let file = dir.join("written.obj");
     let colors = Unconverted;
     let writing = Writing::new(Units::METERS, &colors);
     let mut placed = FileItem::top("thing", standard::geometry().wrap(value.clone()));
@@ -167,26 +158,18 @@ fn what_is_written_reads_back() {
 #[test]
 fn a_file_written_in_a_projects_units_reads_back_where_it_was() {
     use kinogaki_studio_api::geometry::{Attributes, Primitives, UpAxis};
-    let colors = Unconverted;
     let table = Primitives::of_polygons(3, vec![0, 3].into(), vec![0, 1, 2].into()).unwrap();
     let positions = vec![[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 250.0]];
     let value = Geometry::new(positions.clone().into(), table, Attributes::new()).unwrap();
     for (up, name) in [(UpAxis::Y, "y.obj"), (UpAxis::Z, "z.obj")] {
         let units = Units::new(0.001, up).unwrap();
-        let file = scratch(name);
-        let data = standard::geometry().wrap(value.clone());
-        let item = FileItem::top("tri", data);
-        let writing = Writing::new(units, &colors);
-        let writer = Obj.writer().expect("it writes");
-        writer
-            .write(&file, &[item], &writing, &FormatOptions::new())
-            .unwrap();
-        let reading = Reading::new(Purpose::Value, units, &colors);
-        let read = Obj
-            .read(&Input::file(&file), &Obj.options(), &reading)
-            .unwrap();
-        let data = read.items[0].data.as_ref().unwrap();
-        let back = standard::geometry().get(data).unwrap().clone();
+        let dir = Scratch::new("obj");
+        let file = dir.join(name);
+        let item = FileItem::top("tri", standard::geometry().wrap(value.clone()));
+        let (read, said) = round_trip(&Obj, &[item], &file, units).unwrap();
+        assert!(said.is_empty() && read.warnings.is_empty(), "{said:?}");
+        let geometry = |i: &FileItem| standard::geometry().get(i.data.as_ref()?).cloned();
+        let back = read.items.iter().find_map(geometry).expect("its triangle");
         for (a, b) in positions.iter().zip(back.positions().iter()) {
             assert!((0..3).all(|i| (a[i] - b[i]).abs() < 1e-3), "{a:?} {b:?}");
         }

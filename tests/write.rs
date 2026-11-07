@@ -9,6 +9,7 @@ mod random;
 use kinogaki_obj::obj::{
     Elements, NONE, Obj, Run, WriteOptions, parse, to_bytes, write_file, write_with,
 };
+use kinogaki_studio_api_testing::workers;
 use random::Random;
 
 fn round_trip(obj: &Obj) -> Obj {
@@ -183,8 +184,8 @@ fn files_are_replaced_atomically_with_a_comment() {
     let path = directory.join("out.obj");
     std::fs::write(&path, b"old").unwrap();
     let obj = parse(&files::chunked(60)).unwrap();
+    workers::install(3);
     let options = WriteOptions {
-        threads: 3,
         comment: Some("Kinogaki Studio\nY up".into()),
     };
     write_file(&path, &obj, &options).unwrap();
@@ -197,16 +198,9 @@ fn files_are_replaced_atomically_with_a_comment() {
         "no temporary file is left"
     );
     // Thread counts do not change the text.
+    workers::install(1);
     let mut one = Vec::new();
-    write_with(
-        &obj,
-        &mut one,
-        &WriteOptions {
-            threads: 1,
-            ..options.clone()
-        },
-    )
-    .unwrap();
+    write_with(&obj, &mut one, &options).unwrap();
     assert_eq!(one, text);
     // A failed write leaves the old file.
     let mut invalid = obj.clone();

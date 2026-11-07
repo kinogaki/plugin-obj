@@ -24,21 +24,14 @@ fn expected() -> Vec<(String, String)> {
         .collect()
 }
 
-/// The same text read whole on one thread, in many small chunks on many
-/// threads, and streamed in small blocks; all must agree.
+/// The same text read whole, in many small chunks on many threads, and
+/// streamed in small blocks; all must agree.
 fn read_every_way(text: &[u8]) -> Obj {
-    let whole = parse_with(
-        text,
-        ReadOptions {
-            threads: 1,
-            ..ReadOptions::default()
-        },
-    )
-    .unwrap();
+    kinogaki_studio_api_testing::workers::install(8);
+    let whole = parse_with(text, ReadOptions::default()).unwrap();
     let chunked = parse_with(
         text,
         ReadOptions {
-            threads: 8,
             chunk_bytes: 4096,
             ..ReadOptions::default()
         },
@@ -48,7 +41,6 @@ fn read_every_way(text: &[u8]) -> Obj {
     let streamed = read(
         text,
         ReadOptions {
-            threads: 4,
             chunk_bytes: 1024,
             block_bytes: 20_000,
             ..ReadOptions::default()

@@ -4,9 +4,11 @@
 //! reading what was written gives back an equal [`Obj`].
 mod format;
 
-use crate::obj::{Elements, NONE, Obj, ObjError, Run, parallel};
+use crate::obj::{Elements, NONE, Obj, ObjError, Run};
 pub(crate) use format::float;
 use format::integer;
+use kinogaki_studio_api::format::files;
+use kinogaki_studio_api::geometry::parallel;
 use std::{
     io::{self, Write},
     ops::Range,
@@ -16,11 +18,13 @@ use std::{
 /// Records formatted per parallel task.
 const PER_TASK: usize = 16 << 10;
 
+/// Tasks formatted at a time, on the SDK's workers: about 25 MB of text
+/// held at once.
+const TASKS: usize = 32;
+
 /// How to write.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WriteOptions {
-    /// Worker threads; 0 uses the available parallelism.
-    pub threads: usize,
     /// A comment written first, one `#` line per line of text.
     pub comment: Option<String>,
 }
@@ -37,21 +41,20 @@ pub fn to_bytes(obj: &Obj) -> Result<Vec<u8>, ObjError> {
     Ok(out)
 }
 
-/// Write `obj` to `path`, replacing any file there atomically: the text goes
-/// to a temporary file beside it, which is synced and renamed over `path`.
+/// Write `obj` to `path`, replacing any file there whole or not at all
+/// (`files::replace`).
 pub fn write_file(
     path: impl AsRef<Path>,
     obj: &Obj,
     options: &WriteOptions,
 ) -> Result<(), ObjError> {
-    crate::obj::atomic::replace(path.as_ref(), |file| write_with(obj, file, options))
+    files::replace(path.as_ref(), |file| write_with(obj, file, options))
 }
 
 /// Write `obj` as OBJ text.
 pub fn write_with(obj: &Obj, mut out: impl Write, options: &WriteOptions) -> Result<(), ObjError> {
     obj.validate()
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
-    let threads = crate::obj::options::thread_count(options.threads);
     let mut text = Vec::new();
     if let Some(comment) = &options.comment {
         for line in comment.lines() {
@@ -65,10 +68,10 @@ pub fn write_with(obj: &Obj, mut out: impl Write, options: &WriteOptions) -> Res
     }
     out.write_all(&text)?;
     let out = &mut out;
-    batches(out, obj.positions.len(), threads, |range, text| {
+    batches(out, obj.positions.len(), |range, text| {
         vertices(obj, range, text)
     })?;
-    batches(out, obj.texcoords.len(), threads, |range, text| {
+    batches(out, obj.texcoords.len(), |range, text| {
         let mut buffer = kinogaki_float_text::FloatText::new();
         for &[u, v, w] in &obj.texcoords[range] {
             text.extend_from_slice(b"vt ");
@@ -82,7 +85,7 @@ pub fn write_with(obj: &Obj, mut out: impl Write, options: &WriteOptions) -> Res
             text.push(b'\n');
         }
     })?;
-    batches(out, obj.normals.len(), threads, |range, text| {
+    batches(out, obj.normals.len(), |range, text| {
         let mut buffer = kinogaki_float_text::FloatText::new();
         for normal in &obj.normals[range] {
             text.extend_from_slice(b"vn");
@@ -93,7 +96,7 @@ pub fn write_with(obj: &Obj, mut out: impl Write, options: &WriteOptions) -> Res
             text.push(b'\n');
         }
     })?;
-    elements(obj, out, threads)
+    elements(obj, out)
 }
 
 /// `v` records, with weights and colors when the model has them.
@@ -121,7 +124,7 @@ fn vertices(obj: &Obj, range: Range<usize>, text: &mut Vec<u8>) {
 
 /// Faces, polylines and point sets, with the `o`/`g`/`usemtl`/`s`
 /// statements placed where their runs start.
-fn elements(obj: &Obj, out: &mut impl Write, threads: usize) -> Result<(), ObjError> {
+fn elements(obj: &Obj, out: &mut impl Write) -> Result<(), ObjError> {
     let mut statements: Vec<((u32, u32, u32), Vec<u8>)> = Vec::new();
     let mut add = |runs: &[Run<String>], keyword: &[u8]| {
         for run in runs {
@@ -157,13 +160,13 @@ fn elements(obj: &Obj, out: &mut impl Write, threads: usize) -> Result<(), ObjEr
         .chain([(end, &[][..])])
     {
         let until = (at.0 as usize, at.1 as usize, at.2 as usize);
-        batches(out, until.0 - done.0, threads, |range, text| {
+        batches(out, until.0 - done.0, |range, text| {
             rows(&obj.faces, b"f", shift(range, done.0), text)
         })?;
-        batches(out, until.1 - done.1, threads, |range, text| {
+        batches(out, until.1 - done.1, |range, text| {
             rows(&obj.lines, b"l", shift(range, done.1), text)
         })?;
-        batches(out, until.2 - done.2, threads, |range, text| {
+        batches(out, until.2 - done.2, |range, text| {
             rows(&obj.points, b"p", shift(range, done.2), text)
         })?;
         out.write_all(text)?;
@@ -215,14 +218,13 @@ fn statement(text: &mut Vec<u8>, keyword: &[u8], value: &str) {
 }
 
 /// Format records `0..count` in parallel tasks of [`PER_TASK`] and write them
-/// in order, a few tasks per thread at a time.
+/// in order, [`TASKS`] at a time.
 fn batches(
     out: &mut impl Write,
     count: usize,
-    threads: usize,
     format: impl Fn(Range<usize>, &mut Vec<u8>) + Sync,
 ) -> Result<(), ObjError> {
-    let batch = PER_TASK * threads * 2;
+    let batch = PER_TASK * TASKS;
     let mut start = 0;
     while start < count {
         let stop = count.min(start + batch);
@@ -230,7 +232,8 @@ fn batches(
             .step_by(PER_TASK)
             .map(|at| at..stop.min(at + PER_TASK))
             .collect();
-        let texts = parallel::map(tasks, threads, |range| {
+        let texts = parallel::map(tasks.len(), |task| {
+            let range = tasks[task].clone();
             let mut text = Vec::with_capacity(range.len() * 48);
             format(range, &mut text);
             text

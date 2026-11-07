@@ -5,7 +5,11 @@
 //!                                  only and with vt/vn, %.6f numbers
 //!   bench read [--runs N] FILE...  read_file: min and median wall time; also
 //!                                  parse of text in memory on all threads and on one
+//!
+//! It runs as a host does: workers installed, one thread a processor (the
+//! SDK testing support's, as Studio installs its own).
 //!   bench write [--runs N] FILE... write of the file's model into memory and to a file
+use kinogaki_studio_api_testing::workers;
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -47,15 +51,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for path in rest {
                 let text = std::fs::read(path)?;
                 let obj = kinogaki_obj::obj::parse(&text)?;
+                workers::install(0);
                 let file = time(runs, || drop(kinogaki_obj::obj::read_file(path).unwrap()));
                 let memory = time(runs, || drop(kinogaki_obj::obj::parse(&text).unwrap()));
-                // A read's own budget each run: clones share what was spent.
-                let options = || kinogaki_obj::obj::ReadOptions {
-                    threads: 1,
-                    ..Default::default()
-                };
+                workers::install(1);
                 let single = time(runs.min(3), || {
-                    drop(kinogaki_obj::obj::parse_with(&text, options()).unwrap())
+                    drop(kinogaki_obj::obj::parse(&text).unwrap())
                 });
                 println!(
                     "{path}: {} faces, {} MiB; read_file {file}; parse {memory}; parse 1 thread {single}",
@@ -65,6 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         "write" => {
+            workers::install(0);
             for path in rest {
                 let obj = kinogaki_obj::obj::read_file(path)?;
                 let mut size = 0;

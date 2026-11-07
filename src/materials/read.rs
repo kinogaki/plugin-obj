@@ -1,11 +1,11 @@
 //! A material library's materials as MaterialX networks (the module docs
 //! say how each statement maps).
 use super::{
-    BUMP, DISPLACEMENT, Kind, NORMAL, PBR_ONLY, PHONG, PHONG_STATEMENTS, SPACE, STANDARD,
+    BUMP, DISPLACEMENT, Kind, NORMAL, PBR_ONLY, PHONG, PHONG_STATEMENTS, STANDARD,
     STANDARD_STATEMENTS, Statement, WEIGHTS, beside, sig,
 };
 use crate::obj::mtl::{Material, MaterialLibrary, TextureMap};
-use kinogaki_studio_api::color::ColorService;
+use kinogaki_studio_api::color::{ColorService, LIN_REC709};
 use kinogaki_studio_api::format::files::Named;
 use kinogaki_studio_api::geometry::image::ImageSource;
 use kinogaki_studio_api::image_files::image_node;
@@ -210,9 +210,9 @@ impl Build<'_, '_> {
             Held::Number(n) => return number(n, kind),
         };
         let mut held = [rgb];
-        if let Err(e) = self.colors.to_working(SPACE, &mut held) {
+        if let Err(e) = self.colors.to_working(LIN_REC709, &mut held) {
             self.warnings.push(Diagnostic::warning(format!(
-                "{}: colors in {SPACE} kept as they are: {e}",
+                "{}: colors in {LIN_REC709} kept as they are: {e}",
                 m.name
             )));
         }

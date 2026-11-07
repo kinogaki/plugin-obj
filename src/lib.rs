@@ -19,10 +19,6 @@ use kinogaki_studio_api::{
 };
 use std::sync::LazyLock;
 
-/// The space OBJ's vertex colors are taken to be in: it records none, and
-/// what writes them means what the screen showed.
-const COLORS: &str = "sRGB - Display";
-
 /// The package's id.
 pub fn id() -> PackageId {
     PackageId::declared("kinogaki.obj")
@@ -84,7 +80,6 @@ impl FileFormat for Obj {
             ("uvs".to_owned(), Value::Bool(true)),
             ("materials".to_owned(), Value::Bool(true)),
             (options::EMBED.to_owned(), Value::Bool(false)),
-            (options::OUTSIDE.to_owned(), Value::Bool(false)),
             (NORMAL_MAPS.to_owned(), Value::Bool(false)),
         ])
     }
@@ -121,7 +116,6 @@ impl FileFormat for Obj {
         }
         let on = |name| options::option(chosen, name, Value::bool).unwrap_or(false);
         let schema = options::embed(schema, on(options::EMBED));
-        let schema = options::outside(schema, on(options::OUTSIDE));
         let words = "map_Bump bump Blender normal";
         toggle(schema, NORMAL_MAPS, "Bump Maps as Normal Maps", words)
     }

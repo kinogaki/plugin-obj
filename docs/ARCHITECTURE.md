@@ -15,15 +15,13 @@ crates. Owned code forbids `unsafe`. Paths below are under `src/obj/`.
 | `limits.rs` | `Limits`, `ReadOptions` |
 | `line.rs` | tokens of one line: separators, comments, numbers, the rest as a name |
 | `number.rs` | exact decimal parsing (Clinger fast path, std fallback), index fields |
-| `parallel.rs` | ordered parallel map over scoped threads |
 | `read/block.rs` | one block: split, count, size tables, parse chunks in parallel, merge |
 | `read/count.rs` | the counting pass |
 | `read/chunk.rs` | the parsing pass for one chunk |
-| `read/stream.rs` | producer thread reading blocks of whole lines from files/readers |
+| `read/stream.rs` | blocks of whole lines from files/readers, each read while the one before is parsed |
 | `read/mod.rs` | public `parse`, `parse_with`, `read`, `read_file`, `read_file_with` |
 | `write/mod.rs` | writer: validation, parallel formatting batches, statement interleaving |
 | `write/format.rs` | shortest round-trip floats (kinogaki-float-text), integers |
-| `atomic.rs` | temporary-file-and-rename replacement |
 | `mtl/` | MTL model, sequential reader, writer |
 
 ## Model
@@ -48,7 +46,11 @@ A block is a run of whole lines: the whole text for `parse`, or one window of
 a stream.
 
 1. `split` cuts the block into chunks at line feeds: at least
-   `ReadOptions::chunk_bytes` (256 KiB) each, at most four per thread.
+   `ReadOptions::chunk_bytes` (256 KiB) each, at most 256. Every parallel
+   pass runs on the SDK's workers (`parallel::map`), the host's, within its
+   one budget: the reader starts no thread of its own, and with no workers
+   installed (its own tests and tools install the SDK testing support's) it
+   runs on the calling thread.
 2. `count` runs on every chunk in parallel: line feeds, `v`/`vt`/`vn`/`f`
    records and face corners. Keywords are recognised exactly as the parsing
    pass recognises them.
@@ -70,11 +72,13 @@ Corner `vt`/`vn` index tables exist from the first block that has any
 `vt`/`vn`; `finish` drops them when no face referenced one, so a model never
 carries a table full of `NONE`.
 
-Streaming (`read`, and `read_file` above one block): a producer thread fills
-32 MiB buffers, cuts each after its last line feed and carries the tail into
-the next, so the parser always sees whole lines. Buffers are recycled through
-a return channel. A line longer than a block grows the buffer up to
-`Limits::line_bytes`. Line numbers continue across blocks from the counted
+Streaming (`read`, and `read_file` above one block): 32 MiB buffers are
+filled, each cut after its last line feed with the tail carried into the
+next, so the parser always sees whole lines. Each step is two jobs on the
+workers, the block read before parsed while the next is read; a parsed
+block's buffer is the next one read into. A line longer than a block grows
+the buffer up to `ReadOptions::line_bytes`. A cancelled read stops at the
+next block, and no chunk starts parsing once it is cancelled. Line numbers continue across blocks from the counted
 line feeds.
 
 Numbers: `number::parse_f64` reads sign, up to 19 significant digits and the
@@ -88,12 +92,12 @@ overflow) are rejected.
 
 `write_with` validates the model first (so it never writes text that would
 read back differently), then writes `mtllib`, `v`, `vt`, `vn` and the
-elements. Each table is formatted in tasks of 16K records on all threads and
-written in order, a few tasks per thread at a time, so memory holds a few
-megabytes of text. Statements of all four kinds are sorted by their element
+elements. Each table is formatted in tasks of 16K records on the workers and
+written in order, 32 tasks at a time, so memory holds about 25 MB of text. Statements of all four kinds are sorted by their element
 position and interleaved with face, line and point ranges. Floats are the
 shortest round-trip spelling without a trailing `.0`. `write_file` and
-`mtl::write_file` replace the target atomically.
+`mtl::write_file` replace the target whole or not at all, through the SDK's
+`files::replace`.
 
 ## MTL
 

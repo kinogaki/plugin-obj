@@ -8,7 +8,8 @@
 //! its name in the library.
 use crate::materials::write::library;
 use crate::obj::{NONE, Obj, Run, WriteOptions};
-use crate::{COLORS, GEOMETRY, at_file};
+use crate::{GEOMETRY, at_file};
+use kinogaki_studio_api::color::SRGB_DISPLAY;
 use kinogaki_studio_api::edit::editor::{Placed, gather};
 use kinogaki_studio_api::format::files::Beside;
 use kinogaki_studio_api::geometry::{Attribute, Domain, Geometry, Kind, Text, Tuple, names};
@@ -84,7 +85,6 @@ impl FormatWriter for Writer {
             warnings.push(Diagnostic::warning(format!("{curves} curves left out")));
         }
         let options = WriteOptions {
-            threads: 0,
             comment: Some("Y up, in metres".to_owned()),
         };
         let mut named = BTreeMap::new();
@@ -184,7 +184,7 @@ fn obj_of(
     obj.normals = normals.values;
     if let Some(cd) = attributes.tuples::<[f32; 3]>(Domain::Point, names::CD) {
         let mut rgb: Vec<[f64; 3]> = cd.iter().map(|c| c.map(f64::from)).collect();
-        writing.colors.working_to(COLORS, &mut rgb)?;
+        writing.colors.working_to(SRGB_DISPLAY, &mut rgb)?;
         obj.colors = rgb;
     }
     let faces = obj.faces.len();

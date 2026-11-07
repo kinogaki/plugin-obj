@@ -8,8 +8,8 @@
 use crate::materials::read::{Maps, materials};
 use crate::obj::mtl;
 use crate::obj::{Elements, NONE, Obj, ReadOptions, Run, Skipped};
-use crate::{COLORS, GEOMETRY, NORMAL_MAPS, UNITS, at_file};
-use kinogaki_studio_api::color::ColorService;
+use crate::{GEOMETRY, NORMAL_MAPS, UNITS, at_file};
+use kinogaki_studio_api::color::{ColorService, SRGB_DISPLAY};
 use kinogaki_studio_api::edit::editor::{Placed, gather};
 use kinogaki_studio_api::format::files::Named;
 use kinogaki_studio_api::format::{ReadBudget, options};
@@ -189,7 +189,9 @@ fn geometry(
     }
     if !colors.is_empty() {
         let mut rgb = colors;
-        reading.colors.to_working(COLORS, &mut rgb)?;
+        // OBJ records no space: what writes vertex colors means what the
+        // screen showed.
+        reading.colors.to_working(SRGB_DISPLAY, &mut rgb)?;
         let cd: Vec<[f32; 3]> = rgb.iter().map(|c| c.map(|v| v as f32)).collect();
         let column = Attribute::tuples(cd, Meaning::Color)?;
         attributes.set(Domain::Point, names::CD, column)?;

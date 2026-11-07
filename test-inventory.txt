@@ -9,7 +9,7 @@ kinogaki-obj/hostile test a_file_held_in_memory_reads_no_library
 kinogaki-obj/hostile test a_library_named_five_hundred_times_is_read_once
 kinogaki-obj/hostile test a_map_that_is_a_pipe_is_never_opened
 kinogaki-obj/hostile test a_polygon_of_three_hundred_thousand_corners_is_checked_in_n_log_n
-kinogaki-obj/hostile test libraries_and_maps_out_of_the_folder_are_left_unresolved
+kinogaki-obj/hostile test libraries_and_maps_out_of_the_folder_are_read
 kinogaki-obj/hostile test tables_past_the_budget_are_refused_before_they_are_made
 kinogaki-obj/hostile test unknown_keywords_read_in_linear_time_and_are_said_briefly
 kinogaki-obj/lib test materials::tests::signatures_the_mapping_makes_are_materialx_own
@@ -36,6 +36,7 @@ kinogaki-obj/mtl test errors_name_their_line
 kinogaki-obj/mtl test library_paths_try_the_whole_value_first
 kinogaki-obj/mtl test reads_every_statement
 kinogaki-obj/mtl test round_trips
+kinogaki-obj/read test a_read_cancelled_while_it_streams_stops
 kinogaki-obj/read test comments_end_lines_anywhere
 kinogaki-obj/read test crlf_tabs_and_blank_runs_read_alike
 kinogaki-obj/read test empty_inputs_are_empty_models

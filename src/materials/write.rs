@@ -2,13 +2,13 @@
 //! maps): a Phong Surface's and a Standard Surface's statements as their
 //! networks record them, any other model through Standard Surface.
 use super::{
-    BUMP, DISPLACEMENT, Kind, NORMAL, PHONG_STATEMENTS, SPACE, STANDARD_STATEMENTS, Statement,
-    WEIGHTS, beside,
+    BUMP, DISPLACEMENT, Kind, NORMAL, PHONG_STATEMENTS, STANDARD_STATEMENTS, Statement, WEIGHTS,
+    beside,
 };
 use crate::obj::mtl::{MapOptions, Material, MaterialLibrary, TextureMap};
 use kinogaki_render_api::MaterialNetwork;
 use kinogaki_render_api::material::mtlx::{SIGNATURE, def};
-use kinogaki_studio_api::color::{ColorService, settled};
+use kinogaki_studio_api::color::{ColorService, LIN_REC709, settled};
 use kinogaki_studio_api::format::files::Beside;
 use kinogaki_studio_api::image_files::{IMAGE_NODE, image_source};
 use kinogaki_studio_api::network::{NetworkSeed, SeedWire};
@@ -294,7 +294,7 @@ impl Written<'_> {
             }
             (Value::Color(c), _) => {
                 let mut rgb = [c.map(|x| x * weight)];
-                self.colors.working_to(SPACE, &mut rgb)?;
+                self.colors.working_to(LIN_REC709, &mut rgb)?;
                 Held::Color(rgb[0].map(settled))
             }
             (Value::Number(n), Kind::Color) => Held::Color([n * weight; 3]),
