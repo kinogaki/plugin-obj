@@ -1,0 +1,22 @@
+#prisma 4.0
+def package "luce_obj_oracle" {
+    str description = "The luce-obj oracle for the OBJ plugin's differential tests"
+    str owner = "dymokomi"
+    str version = "0.1.0"
+    str source = "src"
+    str kind = "tool"
+    str entry = "src/main.lucb"
+    str language = "luce-base"
+    def dependency "luce-obj" {
+        str owner = "dymokomi"
+        str version = "^0.10.1"
+    }
+    def dependency "luce-geocore" {
+        str owner = "dymokomi"
+        str version = "^0.7.9"
+    }
+    def dependency "luce-std" {
+        str owner = "dymokomi"
+        str version = "^0.7.5"
+    }
+}

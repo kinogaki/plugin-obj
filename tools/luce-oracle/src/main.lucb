@@ -1,0 +1,40 @@
+## The luce-obj oracle for the OBJ plugin's differential tests and benchmarks.
+##
+##   oracle canon IN.obj OUT.obj   Obj.load, then Obj.encode: positions with
+##                                 weights applied, polygons, per-corner vt/vn.
+##                                 Prints "ERROR <message>" when loading fails.
+##   oracle time FILE...           best-of-3 Obj.load (read + parse + Mesh
+##                                 build) and best-of-3 Obj.encode in ms.
+import time
+from luce_std import files
+from luce_obj.obj import Obj
+
+func now() -> f64:
+    return (f64)(time.now()) / 1000000.0
+
+pub func main(arguments: str[]) -> i32!:
+    if arguments.length == 4 and arguments[1] == "canon":
+        let mesh = Obj.load(arguments[2]) catch failure:
+            print(f"ERROR {failure.message}")
+            return 0
+        try Obj.write(arguments[3], mesh)
+        mesh.release()
+        return 0
+    for path in arguments[2..]:
+        var load: f64 = 1e300
+        var encode: f64 = 1e300
+        var faces: i64 = 0
+        for round in 0..<3:
+            let start = now()
+            let mesh = try Obj.load(path)
+            let elapsed = now() - start
+            load = elapsed if elapsed < load else load
+            faces = mesh.value().face_count()
+            let begin = now()
+            let text = try Obj.encode(mesh, attributes = true)
+            let spent = now() - begin
+            encode = spent if spent < encode else encode
+            text.release()
+            mesh.release()
+        print(f"{path}: {faces} faces: load {load} ms, encode {encode} ms")
+    return 0

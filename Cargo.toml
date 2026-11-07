@@ -1,0 +1,32 @@
+[package]
+name = "kinogaki-obj"
+description = "Wavefront OBJ and MTL as a format plugin on the Kinogaki Studio SDK: fast, bounded OBJ and MTL reading and writing, polygons to the standard Geometry and back, MTL materials to MaterialX networks and back"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+license = "MIT OR Apache-2.0"
+
+# The format builds from its own repository, the public SDK's and
+# lib-misc-utils' alone, checked out side by side as Studio's tree lays them
+# out (README "Building"): its manifest names everything it needs instead of
+# inheriting it from the tree.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+
+[dependencies]
+kinogaki-studio-api = { path = "../../sdk/crates/api" }
+# Material networks: MaterialX's nodes, and a network as another shading model.
+kinogaki-render-api = { path = "../../sdk/crates/render-api" }
+# Line-feed search and counting in the chunked reader.
+kinogaki-bytes = { path = "../../libs/lib-misc-utils/crates/bytes" }
+# Shortest round-trip float text for the writers.
+kinogaki-float-text = { path = "../../libs/lib-misc-utils/crates/float-text" }
+
+[dev-dependencies]
+# The SDK's color service that converts nothing.
+kinogaki-studio-api-testing = { path = "../../sdk/crates/api-testing" }
