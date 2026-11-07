@@ -74,7 +74,7 @@ Its design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Tests and data
 
-- `tests/round_trip.rs`: files through the format: the standard value, units, up axis and scale, what is written reads back;
+- `tests/round_trip.rs`: files through the format: the standard value, units, up axis (turned either way, as `format::Conversion` turns it, never mirrored) and scale, what is written reads back;
 - `tests/materials.rs`: every MTL statement and option above read into its network and written back as the same statement and values, the networks checked as MaterialX takes them, textures embedded and written beside, another model written through Standard Surface, and Blender's exports (`tests/fixtures/blender`, made by Blender 5.1.2 with `make.py` there) read and written back unchanged;
 - `tests/read.rs`, `write.rs`, `mtl.rs`: the reader and writer;
 - `tests/fuzz.rs`: mutated files never panic (`OBJ_FUZZ=100 cargo test -p kinogaki-obj --release --test fuzz` runs it longer);

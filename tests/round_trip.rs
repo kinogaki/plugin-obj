@@ -180,3 +180,103 @@ fn a_file_written_in_a_projects_units_reads_back_where_it_was() {
         }
     }
 }
+
+/// The face's normal by its winding: its corners' cross product.
+fn winding_normal(value: &Geometry, face: usize) -> Vec3 {
+    let corners = value.primitives().primitive(face);
+    let at = |c: usize| Vec3::from(value.positions()[corners[c] as usize]);
+    (at(1) - at(0))
+        .cross(at(2) - at(0))
+        .normalized()
+        .expect("a face with area")
+}
+
+fn near(a: Vec3, b: Vec3) -> bool {
+    (a - b).length() < 1e-9
+}
+
+/// A triangle counter-clockwise seen from the file's +Z, its `vn` +Z.
+const UP_Z: &str = "\
+v 0 0 0
+v 1 0 0
+v 0 1 0
+vn 0 0 1
+f 1//1 2//1 3//1
+";
+
+/// A Z-up file read into a Y-up project turns as a rotation does (its +Z
+/// the project's +Y, its +Y the project's −Z): its faces wind as they did,
+/// facing where its normals point. A mirroring would face them away.
+#[test]
+fn a_z_up_file_reads_into_a_y_up_project_turned_not_mirrored() {
+    let up_z = [("up", Value::Choice("z".into()))];
+    let value = read(UP_Z, "z-up.obj", &up_z, Units::METERS);
+    let p = Vec3::from(value.positions()[2]);
+    assert!(near(p, Vec3::new(0.0, 0.0, -1.0)), "file +Y is −Z: {p:?}");
+    let n = value
+        .attributes()
+        .tuples::<[f32; 3]>(Domain::Vertex, names::N)
+        .unwrap()[0];
+    let n = Vec3::new(n[0].into(), n[1].into(), n[2].into());
+    assert!(near(n, Vec3::Y), "file +Z is +Y: {n:?}");
+    let wound = winding_normal(&value, 0);
+    assert!(near(wound, Vec3::Y), "it faces its normal: {wound:?}");
+}
+
+/// A Y-up file read into a Z-up project turns the other way (its +Y the
+/// project's +Z, its +Z the project's −Y), facing where its normals point.
+#[test]
+fn a_y_up_file_reads_into_a_z_up_project_turned_not_mirrored() {
+    let z_up = Units::new(1.0, kinogaki_studio_api::geometry::UpAxis::Z).unwrap();
+    let value = read(UP_Z, "y-up.obj", &[], z_up);
+    let p = Vec3::from(value.positions()[2]);
+    assert!(near(p, Vec3::Z), "file +Y is +Z: {p:?}");
+    let n = value
+        .attributes()
+        .tuples::<[f32; 3]>(Domain::Vertex, names::N)
+        .unwrap()[0];
+    let n = Vec3::new(n[0].into(), n[1].into(), n[2].into());
+    assert!(near(n, -Vec3::Y), "file +Z is −Y: {n:?}");
+    let wound = winding_normal(&value, 0);
+    assert!(near(wound, -Vec3::Y), "it faces its normal: {wound:?}");
+}
+
+/// A Z-up project's faces are written into the file's Y up turned as a
+/// rotation does (the project's +Z the file's +Y, its +Y the file's −Z), so
+/// another application sees them face where their normals point.
+#[test]
+fn a_z_up_project_writes_its_faces_turned_not_mirrored() {
+    let z_up = Units::new(1.0, kinogaki_studio_api::geometry::UpAxis::Z).unwrap();
+    let up_z = [("up", Value::Choice("z".into()))];
+    let value = read(UP_Z, "as-is.obj", &up_z, z_up);
+    let dir = Scratch::new("obj");
+    let file = dir.join("turned.obj");
+    let colors = Unconverted;
+    let item = FileItem::top("tri", standard::geometry().wrap(value));
+    let writer = Obj.writer().expect("it writes");
+    let said = writer
+        .write(
+            &file,
+            &[item],
+            &Writing::new(z_up, &colors),
+            &FormatOptions::new(),
+        )
+        .unwrap();
+    assert!(said.is_empty(), "{said:?}");
+    // Read as the file is, Y up in metres.
+    let text = std::fs::read_to_string(&file).unwrap();
+    let back = read(&text, "back.obj", &[], Units::METERS);
+    let p = Vec3::from(back.positions()[2]);
+    assert!(
+        near(p, Vec3::new(0.0, 0.0, -1.0)),
+        "+Y is the file's −Z: {p:?}"
+    );
+    let n = back
+        .attributes()
+        .tuples::<[f32; 3]>(Domain::Vertex, names::N)
+        .unwrap()[0];
+    let n = Vec3::new(n[0].into(), n[1].into(), n[2].into());
+    assert!(near(n, Vec3::Y), "+Z is the file's +Y: {n:?}");
+    let wound = winding_normal(&back, 0);
+    assert!(near(wound, Vec3::Y), "it faces its normal: {wound:?}");
+}

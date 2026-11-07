@@ -65,8 +65,9 @@ impl FormatWriter for Writer {
         }
         // The file holds what a read of it by default takes: Y up, in metres.
         let defaults = crate::Obj.options();
-        let to_file = (crate::read::placement(&defaults, writing.units)?.inverse())
-            .ok_or_else(|| Error::invalid("the project's units have no inverse"))?;
+        let to_file = crate::read::conversion(&defaults, writing.units)?
+            .inverse()
+            .xform();
         let placed: Vec<Placed<'_>> = (values.iter())
             .map(|(value, at)| Placed {
                 value,

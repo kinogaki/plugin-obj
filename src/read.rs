@@ -12,10 +12,10 @@ use crate::{NORMAL_MAPS, UNITS, at_file};
 use kinogaki_studio_api::color::{ColorService, SRGB_DISPLAY};
 use kinogaki_studio_api::edit::editor::{Placed, gather};
 use kinogaki_studio_api::format::files::Named;
-use kinogaki_studio_api::format::{ReadBudget, options};
+use kinogaki_studio_api::format::{Conversion, ReadBudget, options};
 use kinogaki_studio_api::geometry::{
     Attribute, Attributes, Column, Domain, Elements as Members, Geometry, Kind, Meaning,
-    Primitives, Text, Units, UpAxis, Vec3, Xform, names,
+    Primitives, Text, Units, UpAxis, names,
 };
 use kinogaki_studio_api::standard::Materials;
 use kinogaki_studio_api::{
@@ -210,34 +210,23 @@ fn geometry(
         attributes.set_group(Domain::Primitive, name, members)?;
     }
     let value = Geometry::new(at.into(), table, attributes)?;
-    let at = placement(chosen, reading.units)?;
+    let at = conversion(chosen, reading.units)?.xform();
     Ok((gather(&[Placed { value: &value, at }])?, warnings))
 }
 
-/// File points to the project's: the file's unit over the project's, the
-/// scale, and the turn between their up axes.
-pub(crate) fn placement(chosen: &FormatOptions, target: Units) -> Result<Xform, Error> {
+/// The file's space in the project's: the file's unit (`scale` times the
+/// chosen one) over the project's, and the turn between their up axes.
+pub(crate) fn conversion(chosen: &FormatOptions, target: Units) -> Result<Conversion, Error> {
     let key = options::option(chosen, "unit", Value::choice)?;
     let (_, _, meters) = (UNITS.iter())
         .find(|u| u.0 == key)
         .ok_or_else(|| Error::invalid(format!("no unit {key}")))?;
     let scale = options::option(chosen, "scale", Value::number)?;
-    let k = meters / target.meters_per_unit() * scale;
-    let from = match options::option(chosen, "up", Value::choice)? {
+    let up = match options::option(chosen, "up", Value::choice)? {
         "z" => UpAxis::Z,
         _ => UpAxis::Y,
     };
-    let (x, y, z) = match (from, target.up()) {
-        (UpAxis::Y, UpAxis::Z) => (Vec3::X, Vec3::Z, Vec3::Y * -1.0),
-        (UpAxis::Z, UpAxis::Y) => (Vec3::X, Vec3::Y * -1.0, Vec3::Z),
-        _ => (Vec3::X, Vec3::Y, Vec3::Z),
-    };
-    Ok(Xform::from_axes(
-        x * k,
-        y * k,
-        z * k,
-        Vec3::new(0.0, 0.0, 0.0),
-    ))
+    Ok(Conversion::new(Units::new(meters * scale, up)?, target))
 }
 
 /// The polygons naming no point twice and the polylines, consecutive repeats
