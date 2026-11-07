@@ -1,10 +1,11 @@
 //! A material library's materials as MaterialX networks (the module docs
 //! say how each statement maps).
 use super::{
-    BUMP, DISPLACEMENT, Kind, NORMAL, PBR_ONLY, PHONG, PHONG_STATEMENTS, STANDARD,
+    BUMP, DISPLACEMENT, Kind, NORMAL, PBR_ONLY, PHONG, PHONG_STATEMENTS, SPACE, STANDARD,
     STANDARD_STATEMENTS, Statement, WEIGHTS, beside, sig,
 };
 use crate::obj::mtl::{Material, MaterialLibrary, TextureMap};
+use kinogaki_studio_api::color::ColorService;
 use kinogaki_studio_api::format::files::Named;
 use kinogaki_studio_api::geometry::image::ImageSource;
 use kinogaki_studio_api::image_files::image_node;
@@ -28,11 +29,12 @@ pub struct Maps<'a> {
     pub normal_maps: bool,
 }
 
-/// `library`'s materials as networks, each keyed by its name, and what was
-/// left out, said once a material.
+/// `library`'s materials as networks, each keyed by its name, their colors
+/// in `colors`' working space, and what was left out, said once a material.
 pub fn materials(
     library: &MaterialLibrary,
     maps: Maps<'_>,
+    colors: &dyn ColorService,
 ) -> (Vec<ImportedMaterial>, Vec<Diagnostic>) {
     let mut warnings = Vec::new();
     let made = (library.materials.iter())
@@ -40,6 +42,7 @@ pub fn materials(
             let mut build = Build {
                 seed: NetworkSeed::default(),
                 maps,
+                colors,
                 images: Vec::new(),
                 left: Vec::new(),
                 warnings: &mut warnings,
@@ -75,6 +78,7 @@ enum Read {
 struct Build<'a, 'w> {
     seed: NetworkSeed,
     maps: Maps<'a>,
+    colors: &'a dyn ColorService,
     /// The Image node reading each file, by its path as written; none for
     /// one out of reach.
     images: Vec<(String, Option<usize>)>,
@@ -170,7 +174,8 @@ impl Build<'_, '_> {
         let map = (!s.map.is_empty()).then(|| m.map(s.map)).flatten();
         let Some(map) = map else {
             if let Some(v) = value {
-                self.set(surface, s.input, value_of(v, s.kind));
+                let v = self.value(m, v, s.kind);
+                self.set(surface, s.input, v);
             }
             return;
         };
@@ -181,8 +186,8 @@ impl Build<'_, '_> {
         let mut out = self.texture(map, read);
         if let Some(v) = value {
             let (signature, v) = match s.kind {
-                Kind::Color => (sig::MULTIPLY_COLOR, value_of(v, Kind::Color)),
-                _ => (sig::MULTIPLY, value_of(v, Kind::Number)),
+                Kind::Color => (sig::MULTIPLY_COLOR, self.value(m, v, Kind::Color)),
+                _ => (sig::MULTIPLY, self.value(m, v, Kind::Number)),
             };
             let times = self.node(signature);
             self.set(times, "in2", v);
@@ -195,6 +200,23 @@ impl Build<'_, '_> {
             out = grey;
         }
         self.wire(out, surface, s.input);
+    }
+
+    /// `v`, a statement of `m`, as an input of `kind` holds it: a color in
+    /// the working space (kept as it is, said, where it can't be).
+    fn value(&mut self, m: &Material, v: Held, kind: Kind) -> Value {
+        let rgb = match v {
+            Held::Color(rgb) => rgb,
+            Held::Number(n) => return number(n, kind),
+        };
+        let mut held = [rgb];
+        if let Err(e) = self.colors.to_working(SPACE, &mut held) {
+            self.warnings.push(Diagnostic::warning(format!(
+                "{}: colors in {SPACE} kept as they are: {e}",
+                m.name
+            )));
+        }
+        Value::Color(held[0])
     }
 
     /// The material's normal map and bump map into `surface`'s normal, the
@@ -411,12 +433,11 @@ fn holds(m: &Material, keyword: &str) -> bool {
     !keyword.is_empty() && (held(m, keyword).is_some() || m.map(keyword).is_some())
 }
 
-/// `v` as an input of `kind` holds it.
-fn value_of(v: Held, kind: Kind) -> Value {
-    match (v, kind) {
-        (Held::Color(c), _) => Value::Color(c),
-        (Held::Number(n), Kind::Grey) => Value::Color([n; 3]),
-        (Held::Number(n), Kind::Integer) => Value::Integer(n as i64),
-        (Held::Number(n), _) => Value::Number(n),
+/// Number `n` as an input of `kind` holds it.
+fn number(n: f64, kind: Kind) -> Value {
+    match kind {
+        Kind::Grey => Value::Color([n; 3]),
+        Kind::Integer => Value::Integer(n as i64),
+        Kind::Color | Kind::Number => Value::Number(n),
     }
 }

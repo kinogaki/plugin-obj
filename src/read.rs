@@ -9,6 +9,7 @@ use crate::materials::read::{Maps, materials};
 use crate::obj::mtl;
 use crate::obj::{Elements, NONE, Obj, ReadOptions, Run, Skipped};
 use crate::{COLORS, GEOMETRY, NORMAL_MAPS, UNITS, at_file};
+use kinogaki_studio_api::color::ColorService;
 use kinogaki_studio_api::edit::editor::{Placed, gather};
 use kinogaki_studio_api::format::files::Named;
 use kinogaki_studio_api::format::{ReadBudget, options};
@@ -64,7 +65,7 @@ pub(crate) fn read(
             folder: None,
             normal_maps: options::option(chosen, NORMAL_MAPS, Value::bool)?,
         };
-        let held = libraries_of(&libraries, maps, &mut warnings);
+        let held = libraries_of(&libraries, maps, reading.colors, &mut warnings);
         warnings.extend(named.warnings());
         items.insert(
             0,
@@ -76,8 +77,14 @@ pub(crate) fn read(
 
 /// The materials of the libraries `libraries` name (each `mtllib` value),
 /// reached through `maps.named`, each file read once and the first
-/// material of a name kept; what couldn't be read said in `warnings`.
-fn libraries_of(libraries: &[String], maps: Maps<'_>, warnings: &mut Vec<Diagnostic>) -> Materials {
+/// material of a name kept, their colors in `colors`' working space; what
+/// couldn't be read said in `warnings`.
+fn libraries_of(
+    libraries: &[String],
+    maps: Maps<'_>,
+    colors: &dyn ColorService,
+    warnings: &mut Vec<Diagnostic>,
+) -> Materials {
     let mut held = Materials::default();
     let mut read: HashSet<PathBuf> = HashSet::new();
     let mut keys: HashSet<String> = HashSet::new();
@@ -105,7 +112,7 @@ fn libraries_of(libraries: &[String], maps: Maps<'_>, warnings: &mut Vec<Diagnos
             folder: path.parent(),
             ..maps
         };
-        let (made, left) = materials(&library, maps);
+        let (made, left) = materials(&library, maps, colors);
         warnings.extend(left);
         for m in made {
             match keys.insert(m.key.clone()) {

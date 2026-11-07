@@ -2,12 +2,13 @@
 //! maps): a Phong Surface's and a Standard Surface's statements as their
 //! networks record them, any other model through Standard Surface.
 use super::{
-    BUMP, DISPLACEMENT, Kind, NORMAL, PHONG_STATEMENTS, STANDARD_STATEMENTS, Statement, WEIGHTS,
-    beside,
+    BUMP, DISPLACEMENT, Kind, NORMAL, PHONG_STATEMENTS, SPACE, STANDARD_STATEMENTS, Statement,
+    WEIGHTS, beside,
 };
 use crate::obj::mtl::{MapOptions, Material, MaterialLibrary, TextureMap};
 use kinogaki_render_api::MaterialNetwork;
 use kinogaki_render_api::material::mtlx::{SIGNATURE, def};
+use kinogaki_studio_api::color::{ColorService, settled};
 use kinogaki_studio_api::format::files::Beside;
 use kinogaki_studio_api::image_files::{IMAGE_NODE, image_source};
 use kinogaki_studio_api::network::{NetworkSeed, SeedWire};
@@ -24,11 +25,17 @@ pub struct Library {
 }
 
 /// `held`'s materials as a library, each named as it is (numbered past a
-/// name taken), their images named by `files`.
+/// name taken), their colors out of `colors`' working space, their images
+/// named by `files`.
 ///
 /// # Errors
-/// An embedded image that can't be written.
-pub fn library(held: &Materials, files: &mut Beside) -> Result<Library, Error> {
+/// An embedded image that can't be written, a color that can't be
+/// converted.
+pub fn library(
+    held: &Materials,
+    files: &mut Beside,
+    colors: &dyn ColorService,
+) -> Result<Library, Error> {
     let mut made = Library {
         library: MaterialLibrary::default(),
         names: BTreeMap::new(),
@@ -47,6 +54,7 @@ pub fn library(held: &Materials, files: &mut Beside) -> Result<Library, Error> {
                 ..Material::default()
             },
             files: &mut *files,
+            colors,
             lossy: Vec::new(),
         };
         written.material_of(m)?;
@@ -108,6 +116,7 @@ impl Net<'_> {
 struct Written<'f> {
     material: Material,
     files: &'f mut Beside,
+    colors: &'f dyn ColorService,
     /// What was written with loss, in words.
     lossy: Vec<String>,
 }
@@ -251,7 +260,12 @@ impl Written<'_> {
             value = Some(v.clone());
             from = net.from(f, "in1");
         }
-        if let Some(v) = value.as_ref().and_then(|v| self.held(v, s, weight)) {
+        if let Some(v) = value
+            .as_ref()
+            .map(|v| self.held(v, s, weight))
+            .transpose()?
+            .flatten()
+        {
             set(&mut self.material, s.keyword, v);
         } else if from.is_some() && weight != 1.0 && !s.map.is_empty() {
             set(&mut self.material, s.keyword, Held::Color([weight; 3]));
@@ -269,21 +283,26 @@ impl Written<'_> {
         Ok(())
     }
 
-    /// `v`, statement `s`'s value, times `weight`, as the library holds it.
-    fn held(&mut self, v: &Value, s: &Statement, weight: f64) -> Option<Held> {
+    /// `v`, statement `s`'s value, times `weight`, as the library holds it:
+    /// a color out of the working space.
+    fn held(&mut self, v: &Value, s: &Statement, weight: f64) -> Result<Option<Held>, Error> {
         let held = match (v, s.kind) {
             (Value::Color(c), Kind::Grey) if c[0] == c[1] && c[1] == c[2] => Held::Number(c[0]),
             (Value::Color(c), Kind::Grey) => {
                 (self.lossy).push(format!("{} the mean of its color", s.keyword));
                 Held::Number((c[0] + c[1] + c[2]) / 3.0)
             }
-            (Value::Color(c), _) => Held::Color(c.map(|x| x * weight)),
+            (Value::Color(c), _) => {
+                let mut rgb = [c.map(|x| x * weight)];
+                self.colors.working_to(SPACE, &mut rgb)?;
+                Held::Color(rgb[0].map(settled))
+            }
             (Value::Number(n), Kind::Color) => Held::Color([n * weight; 3]),
             (Value::Number(n), _) => Held::Number(*n),
             (Value::Integer(n), _) => Held::Number(*n as f64),
-            _ => return None,
+            _ => return Ok(None),
         };
-        Some(held)
+        Ok(Some(held))
     }
 
     /// The bump and normal maps driving `at`'s normal.

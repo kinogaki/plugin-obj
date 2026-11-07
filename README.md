@@ -28,6 +28,8 @@ Each MTL material is a MaterialX network:
 | `-mm base gain` | `multiply` by the gain, then `add` the base |
 | `-blendu`, `-blendv`, `-boost`, `-texres`, `-t`, `-cc`, `-type`, `-imfchan l` and `z`, a texture's third coordinate, `refl`, `decal`, `sharpness` and other statements | left out, said once a material |
 
+Colors (`Ka`, `Kd`, `Ks`, `Ke`, `Tf`) are linear Rec.709, as every format's material colors: MTL records no space. They are read into the working space, and written out of it to twelve significant digits, so a color read and written back is the number it was.
+
 Writing goes the other way: a Phong Surface's and a Standard Surface's statements as their networks record them (a value where the input holds one, a map where an Image node feeds it, both where a `multiply` joins them), the Phong Surface beside a Standard Surface's classic statements too; a normal map as `norm` and a bump map as `map_Bump`; any other shading model translated to Standard Surface (`MaterialNetwork::translated`), an engine's own material through its standard form. What MTL can't record is left out, said. Texture paths are written relative to the library; embedded images are written beside it, in `<stem>_textures/`, once for equal bytes.
 
 ## Writing

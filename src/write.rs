@@ -91,7 +91,7 @@ impl FormatWriter for Writer {
         let mut libraries = Vec::new();
         if let Some(held) = materials.filter(|m| !m.materials.is_empty()) {
             let mtl = path.with_extension("mtl");
-            let made = library(held, &mut Beside::new(&mtl))?;
+            let made = library(held, &mut Beside::new(&mtl), writing.colors)?;
             at_file(
                 mtl.display(),
                 crate::obj::mtl::write_file(&mtl, &made.library),

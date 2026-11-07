@@ -322,6 +322,70 @@ fn the_pbr_extension_is_a_standard_surface_beside_a_phong_surface_nothing_reads(
     assert_eq!(seed.nodes[normal].parameters["scale"], Value::Number(0.8));
 }
 
+/// A color service whose working space is twice linear Rec.709, by name.
+#[derive(Debug)]
+struct Doubled;
+impl kinogaki_studio_api::color::ColorService for Doubled {
+    fn working(&self) -> &str {
+        "doubled"
+    }
+    fn convert(
+        &self,
+        from: &str,
+        to: &str,
+        rgb: &mut [[f64; 3]],
+    ) -> Result<(), kinogaki_studio_api::Error> {
+        let k = match (from, to) {
+            ("lin_rec709_scene", "doubled") => 2.0,
+            ("doubled", "lin_rec709_scene") => 0.5,
+            _ => return Err(kinogaki_studio_api::Error::invalid("no such space")),
+        };
+        rgb.iter_mut().flatten().for_each(|c| *c *= k);
+        Ok(())
+    }
+    fn revision(&self) -> u64 {
+        0
+    }
+}
+
+#[test]
+fn colors_read_into_the_working_space_and_write_out_of_it() {
+    let dir = scratch("colors");
+    let library = "newmtl Red\nKd 0.5 0.25 0.125\nKs 0.1 0.2 0.3\nd 0.5\n";
+    std::fs::write(dir.join("lib.mtl"), library).unwrap();
+    std::fs::write(dir.join("model.obj"), "mtllib lib.mtl\n").unwrap();
+    let reading = Reading::new(Purpose::Objects, Units::METERS, &Doubled);
+    let path = dir.join("model.obj");
+    let read = Obj
+        .read(&Input::file(&path), &Obj.options(), &reading)
+        .unwrap();
+    let data = read.items[0].data.as_ref().unwrap();
+    let held = standard::materials().get(data).unwrap().clone();
+    let seed = &held.materials[0].inside;
+    let [phong] = node(seed, "ND_kinogaki_phong_surface_surfaceshader")[..] else {
+        panic!("a Phong Surface")
+    };
+    let value = |input: &str| seed.nodes[phong].parameters[input].clone();
+    assert_eq!(value("diffuse_color"), Value::Color([1.0, 0.5, 0.25]));
+    assert_eq!(value("specular_color"), Value::Color([0.2, 0.4, 0.6]));
+    assert_eq!(
+        value("opacity"),
+        Value::Number(0.5),
+        "an opacity isn't a color"
+    );
+    let items = [
+        FileItem::top("Materials", standard::materials().wrap(held.clone())),
+        FileItem::top("Red", standard::geometry().wrap(square("Red"))),
+    ];
+    let writing = Writing::new(Units::METERS, &Doubled);
+    let writer = Obj.writer().unwrap();
+    let out = dir.join("again.obj");
+    (writer.write(&out, &items, &writing, &FormatOptions::new())).unwrap();
+    let written = std::fs::read_to_string(dir.join("again.mtl")).unwrap();
+    assert!(written.contains("Kd 0.5 0.25 0.125\n"), "{written}");
+    assert!(written.contains("Ks 0.1 0.2 0.3\n"), "{written}");
+}
+
 #[test]
 fn tr_alone_is_the_opacity_s_inverse() {
     let (held, _) = read_library("tr", EVERY, &[]);

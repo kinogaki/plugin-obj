@@ -20,11 +20,19 @@
 //!   when the reader is told Blender's convention (D19); `norm` is a
 //!   `normalmap`. `disp` is a `displacement` into a Surface Material.
 //!
+//! - **Colors** are linear Rec.709, read into the working space and written
+//!   out of it.
+//!
 //! [`read::materials`] makes the networks of a library; [`write::library`]
 //! makes a library of networks: Phong and Standard Surface statements as
 //! they are recorded, any other model translated to Standard Surface.
 pub mod read;
 pub mod write;
+
+/// The space a library's colors (`Ka`, `Kd`, `Ks`, `Ke`, `Tf`) are taken to
+/// be in: it records none, and every format's material colors are linear
+/// Rec.709. They are read into the working space and written out of it.
+const SPACE: &str = "lin_rec709_scene";
 
 /// How a statement's value is held.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
