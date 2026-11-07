@@ -4,6 +4,14 @@ kinogaki-obj/doc test plugins/obj/src/obj/mod.rs - obj
 kinogaki-obj/fuzz test mutated_corpus_files
 kinogaki-obj/fuzz test random_bytes
 kinogaki-obj/fuzz test random_token_soup
+kinogaki-obj/hostile test a_face_in_twenty_thousand_groups_reads_in_linear_time
+kinogaki-obj/hostile test a_file_held_in_memory_reads_no_library
+kinogaki-obj/hostile test a_library_named_five_hundred_times_is_read_once
+kinogaki-obj/hostile test a_map_that_is_a_pipe_is_never_opened
+kinogaki-obj/hostile test a_polygon_of_three_hundred_thousand_corners_is_checked_in_n_log_n
+kinogaki-obj/hostile test libraries_and_maps_out_of_the_folder_are_left_unresolved
+kinogaki-obj/hostile test tables_past_the_budget_are_refused_before_they_are_made
+kinogaki-obj/hostile test unknown_keywords_read_in_linear_time_and_are_said_briefly
 kinogaki-obj/lib test materials::tests::signatures_the_mapping_makes_are_materialx_own
 kinogaki-obj/lib test obj::number::tests::matches_the_standard_parser
 kinogaki-obj/lib test obj::number::tests::rejects_non_numbers_and_non_finite_values
@@ -32,7 +40,6 @@ kinogaki-obj/read test crlf_tabs_and_blank_runs_read_alike
 kinogaki-obj/read test empty_inputs_are_empty_models
 kinogaki-obj/read test errors_are_the_first_in_file_order_on_any_thread_count
 kinogaki-obj/read test indices_uvs_and_normals
-kinogaki-obj/read test limits_bound_every_table
 kinogaki-obj/read test malformed_records_fail_with_their_position
 kinogaki-obj/read test n_gons_of_any_size
 kinogaki-obj/read test names_and_comments_need_not_be_utf8
@@ -40,6 +47,7 @@ kinogaki-obj/read test polylines_and_point_sets
 kinogaki-obj/read test statements_become_runs
 kinogaki-obj/read test streamed_files_read_like_text_in_memory
 kinogaki-obj/read test the_65536_corner_regression
+kinogaki-obj/read test the_budget_bounds_every_table_and_line_and_stops_a_cancelled_read
 kinogaki-obj/read test unrepresented_statements_are_skipped_and_reported
 kinogaki-obj/read test weights_and_colors_fill_in_defaults
 kinogaki-obj/round_trip test a_file_held_in_memory_reads_as_the_same_file_on_disk
