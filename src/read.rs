@@ -82,8 +82,7 @@ fn libraries_of(libraries: &[String], maps: Maps<'_>, warnings: &mut Vec<Diagnos
     let mut read: HashSet<PathBuf> = HashSet::new();
     let mut keys: HashSet<String> = HashSet::new();
     for value in libraries {
-        let found =
-            (mtl::library_paths(value).into_iter()).find_map(|name| maps.named.file(name, None));
+        let found = maps.named.first(mtl::library_paths(value), None);
         let Some(path) = found else { continue };
         if !read.insert(path.clone()) {
             continue;
@@ -173,33 +172,33 @@ fn geometry(
         let uv = corners(&kept, |e| &e.texcoords, |i| texcoords[i], [0.0; 3]);
         let uv: Vec<[f32; 2]> = uv.iter().map(|t| [t[0] as f32, t[1] as f32]).collect();
         let column = Attribute::tuples(uv, Meaning::TextureCoord)?;
-        attributes = attributes.with(Domain::Vertex, names::UV, column)?;
+        attributes.set(Domain::Vertex, names::UV, column)?;
     }
     if keep_normals && !kept.faces.normals.is_empty() {
         let n = corners(&kept, |e| &e.normals, |i| normals[i], [0.0; 3]);
         let n: Vec<[f32; 3]> = n.iter().map(|v| v.map(|c| c as f32)).collect();
         let column = Attribute::tuples(n, Meaning::Normal)?;
-        attributes = attributes.with(Domain::Vertex, names::N, column)?;
+        attributes.set(Domain::Vertex, names::N, column)?;
     }
     if !colors.is_empty() {
         let mut rgb = colors;
         reading.colors.to_working(COLORS, &mut rgb)?;
         let cd: Vec<[f32; 3]> = rgb.iter().map(|c| c.map(|v| v as f32)).collect();
         let column = Attribute::tuples(cd, Meaning::Color)?;
-        attributes = attributes.with(Domain::Point, names::CD, column)?;
+        attributes.set(Domain::Point, names::CD, column)?;
     }
     if keep_materials && !materials.is_empty() {
         let column = text_column(&kept, &materials)?;
-        attributes = attributes.with(Domain::Primitive, names::MATERIAL, column)?;
+        attributes.set(Domain::Primitive, names::MATERIAL, column)?;
     }
     let pieces = if by_groups { &groups } else { &objects };
     if !pieces.is_empty() {
         let column = text_column(&kept, pieces)?;
-        attributes = attributes.with(Domain::Primitive, names::NAME, column)?;
+        attributes.set(Domain::Primitive, names::NAME, column)?;
     }
     for (name, members) in primitive_groups(&kept, &groups, &reading.budget)? {
         reading.check()?;
-        attributes = attributes.with_group(Domain::Primitive, name, members)?;
+        attributes.set_group(Domain::Primitive, name, members)?;
     }
     let value = Geometry::new(at.into(), table, attributes)?;
     let at = placement(chosen, reading.units)?;
