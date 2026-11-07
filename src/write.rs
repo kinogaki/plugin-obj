@@ -6,9 +6,9 @@
 //! library beside it (`<stem>.mtl`, named by `mtllib`), their textures named
 //! relative to it, embedded ones written beside it; `usemtl` names each by
 //! its name in the library.
+use crate::at_file;
 use crate::materials::write::library;
 use crate::obj::{NONE, Obj, Run, WriteOptions};
-use crate::{GEOMETRY, at_file};
 use kinogaki_studio_api::color::SRGB_DISPLAY;
 use kinogaki_studio_api::edit::editor::{Placed, gather};
 use kinogaki_studio_api::format::files::Beside;
@@ -19,23 +19,20 @@ use kinogaki_studio_api::{
 };
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::LazyLock;
 
 pub(crate) struct Writer;
 
 /// What it writes: geometry, what the host makes polygons of, and materials.
-static WRITES: LazyLock<[DataTypeId; 4]> = LazyLock::new(|| {
-    [
-        *GEOMETRY,
-        standard::brep().id(),
-        standard::instances().id(),
-        standard::materials().id(),
-    ]
-});
+const WRITES: &[DataTypeId] = &[
+    standard::geometry().id(),
+    standard::brep().id(),
+    standard::instances().id(),
+    standard::materials().id(),
+];
 
 impl FormatWriter for Writer {
     fn accepts(&self) -> &[DataTypeId] {
-        &*WRITES
+        WRITES
     }
     fn write(
         &self,

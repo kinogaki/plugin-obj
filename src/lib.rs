@@ -17,7 +17,6 @@ use kinogaki_studio_api::{
     DataTypeId, Error, FileFormat, FormatId, FormatOptions, FormatWriter, Imported, Input, Package,
     PackageId, Purpose, Reading, Value, standard,
 };
-use std::sync::LazyLock;
 
 /// The package's id.
 pub fn id() -> PackageId {
@@ -43,11 +42,8 @@ const UNITS: [(&str, &str, f64); 5] = [
     ("ft", "Feet", 0.3048),
 ];
 
-static GEOMETRY: LazyLock<DataTypeId> = LazyLock::new(|| standard::geometry().id());
-
 /// What a read makes: the geometry, and the materials its libraries hold.
-static PRODUCES: LazyLock<[DataTypeId; 2]> =
-    LazyLock::new(|| [*GEOMETRY, standard::materials().id()]);
+const PRODUCES: &[DataTypeId] = &[standard::geometry().id(), standard::materials().id()];
 
 /// The option reading `bump` and `map_Bump` as normal maps (D19).
 const NORMAL_MAPS: &str = "normal_maps";
@@ -66,7 +62,7 @@ impl FileFormat for Obj {
         &["obj"]
     }
     fn produces(&self) -> &[DataTypeId] {
-        &*PRODUCES
+        PRODUCES
     }
     /// OBJ records neither units nor an up axis: the file's are taken as
     /// these unless set (Y up in metres, what most exporters write).

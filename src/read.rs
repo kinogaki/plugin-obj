@@ -8,7 +8,7 @@
 use crate::materials::read::{Maps, materials};
 use crate::obj::mtl;
 use crate::obj::{Elements, NONE, Obj, ReadOptions, Run, Skipped};
-use crate::{GEOMETRY, NORMAL_MAPS, UNITS, at_file};
+use crate::{NORMAL_MAPS, UNITS, at_file};
 use kinogaki_studio_api::color::{ColorService, SRGB_DISPLAY};
 use kinogaki_studio_api::edit::editor::{Placed, gather};
 use kinogaki_studio_api::format::files::Named;
@@ -50,7 +50,7 @@ pub(crate) fn read(
     };
     let mut items = Vec::new();
     let mut warnings = Vec::new();
-    if wants(*GEOMETRY) {
+    if wants(standard::geometry().id()) {
         let (value, left) = geometry(obj, chosen, reading)?;
         let name = Path::new(input.name())
             .file_stem()
