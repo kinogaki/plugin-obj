@@ -9,6 +9,7 @@ mod random;
 use kinogaki_obj::obj::{
     Elements, NONE, Obj, Run, WriteOptions, parse, to_bytes, write_file, write_with,
 };
+use kinogaki_studio_api_testing::format::Scratch;
 use kinogaki_studio_api_testing::workers;
 use random::Random;
 
@@ -179,8 +180,7 @@ fn invalid_models_are_refused() {
 
 #[test]
 fn files_are_replaced_atomically_with_a_comment() {
-    let directory = std::env::temp_dir().join(format!("obj-write-{}", std::process::id()));
-    std::fs::create_dir_all(&directory).unwrap();
+    let directory = Scratch::new("obj-write");
     let path = directory.join("out.obj");
     std::fs::write(&path, b"old").unwrap();
     let obj = parse(&files::chunked(60)).unwrap();
@@ -208,5 +208,4 @@ fn files_are_replaced_atomically_with_a_comment() {
     assert!(write_file(&path, &invalid, &options).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), text);
     assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
-    std::fs::remove_dir_all(&directory).unwrap();
 }

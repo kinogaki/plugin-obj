@@ -3,6 +3,7 @@ use kinogaki_obj::obj::{
     MalformedKind,
     mtl::{self, MapOptions, Material, MaterialLibrary, TextureMap},
 };
+use kinogaki_studio_api_testing::format::Scratch;
 
 const SAMPLE: &str = "# exported\nKd 9 9 9\nnewmtl steel  \n\tKa 0.1 0.1 0.1\nKd 0.5 0.6 0.7 # grey\nKs 1\nNs 250\nNi 1.45\nd 0.9\nillum 2\nmap_Kd -s 2 2 1 -o 0.5 0.5 textures/brushed steel.png\nmap_Bump -bm 0.3 normal.png\nbump plain.png\nPr 0.25\nPm 1\nKe xyz 0.1 0.2 0.3\nsharpness 60\n\nnewmtl glass\nTr 0.75\nTf 0.9 1 0.9\nnorm -clamp on n.png\nmap_d -imfchan m -mm 0.1 0.8 -blendu off -t 0.5 a.png\n";
 
@@ -74,12 +75,10 @@ fn round_trips() {
         }],
     };
     assert_eq!(mtl::parse(&mtl::to_bytes(&built)).unwrap(), built);
-    let directory = std::env::temp_dir().join(format!("obj-mtl-{}", std::process::id()));
-    std::fs::create_dir_all(&directory).unwrap();
+    let directory = Scratch::new("obj-mtl");
     let path = directory.join("scene.mtl");
     mtl::write_file(&path, &library).unwrap();
     assert_eq!(mtl::read_file(&path).unwrap(), library);
-    std::fs::remove_dir_all(&directory).unwrap();
 }
 
 #[test]

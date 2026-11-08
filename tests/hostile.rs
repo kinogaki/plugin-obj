@@ -10,8 +10,9 @@ use kinogaki_studio_api::geometry::image::ImageFile;
 use kinogaki_studio_api::image_files::image_source;
 use kinogaki_studio_api::standard;
 use kinogaki_studio_api::{Error, FileFormat, FormatOptions, Imported, Input, Value};
+use kinogaki_studio_api_testing::format::Scratch;
 use kinogaki_studio_api_testing::read_hostile;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 /// How long a hostile read may take in a debug build: seconds where the
@@ -43,16 +44,11 @@ fn read_file(path: &Path, options: &[(&str, bool)]) -> Imported {
     read.unwrap()
 }
 
-/// A new folder holding `scene/` (where the file is read), by its
-/// canonical path.
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "kinogaki-obj-hostile-{name}-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
+/// A scratch folder holding `scene/` (where the file is read).
+fn scratch(name: &str) -> Scratch {
+    let dir = Scratch::new(&format!("obj-hostile-{name}"));
     std::fs::create_dir_all(dir.join("scene")).unwrap();
-    dir.canonicalize().unwrap()
+    dir
 }
 
 #[test]
@@ -173,7 +169,6 @@ fn libraries_and_maps_out_of_the_folder_are_read() {
     };
     assert_eq!(embedded(0), [b"far".to_vec(), b"wood".to_vec()]);
     assert_eq!(embedded(1), [b"far".to_vec()]);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -196,7 +191,6 @@ fn a_map_that_is_a_pipe_is_never_opened() {
         "{:?}",
         read.warnings
     );
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -216,7 +210,6 @@ fn a_library_named_five_hundred_times_is_read_once() {
         .unwrap();
     assert_eq!(held.materials.len(), 5_000);
     assert!(read.warnings.is_empty(), "{:?}", read.warnings);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]

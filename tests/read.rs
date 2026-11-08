@@ -7,6 +7,7 @@ use kinogaki_obj::obj::{
 };
 use kinogaki_studio_api::CancelToken;
 use kinogaki_studio_api::format::{ReadBudget, ReadLimits};
+use kinogaki_studio_api_testing::format::Scratch;
 use kinogaki_studio_api_testing::workers;
 
 fn malformed(text: &str) -> kinogaki_obj::obj::Malformed {
@@ -320,8 +321,7 @@ fn the_budget_bounds_every_table_and_line_and_stops_a_cancelled_read() {
 
 #[test]
 fn streamed_files_read_like_text_in_memory() {
-    let directory = std::env::temp_dir().join(format!("obj-read-{}", std::process::id()));
-    std::fs::create_dir_all(&directory).unwrap();
+    let directory = Scratch::new("obj-read");
     let path = directory.join("chunked.obj");
     let text = files::chunked(120);
     std::fs::write(&path, &text).unwrap();
@@ -353,7 +353,6 @@ fn streamed_files_read_like_text_in_memory() {
         read_file_with(directory.join("missing.obj"), options()),
         Err(ObjError::Io(_))
     ));
-    std::fs::remove_dir_all(&directory).unwrap();
 }
 
 /// A read cancelled while its file streams in stops at the next block,
