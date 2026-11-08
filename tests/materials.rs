@@ -501,10 +501,7 @@ fn another_model_writes_through_standard_surface() {
         standard: None,
         double_sided: true,
     };
-    let held = Materials {
-        materials: vec![m],
-        images: Vec::new(),
-    };
+    let held = Materials { materials: vec![m] };
     let dir = Scratch::new("translated");
     let (written, warnings) = write(&dir, "gold", &held);
     assert!(warnings.is_empty(), "{warnings:?}");
