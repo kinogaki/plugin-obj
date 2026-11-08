@@ -34,7 +34,7 @@ Writing goes the other way: a Phong Surface's and a Standard Surface's statement
 
 ## Writing
 
-One OBJ of every item's polygons and polylines at its placement, Y up in metres (a comment says so; OBJ records neither), `uv` and `N` as `vt` and `vn`, point `Cd` as vertex colors, `name` as `o`, `material` as `usemtl`, groups as `g`; B-reps and instances through the host's mesher. The materials item's Materials go to `<stem>.mtl` beside the file (`mtllib`), each `usemtl` naming its material by its name there.
+One OBJ of every item's polygons and polylines at its placement, Y up in metres (a comment says so; OBJ records neither), `uv` and `N` as `vt` and `vn`, point `Cd` as vertex colors, `name` as `o`, `material` as `usemtl`, groups as `g`; B-reps and instances through the host's mesher. Every materials item's Materials (a Material Library each) go to one `<stem>.mtl` beside the file (`mtllib`), each `usemtl` naming its material by its name there.
 
 ## The reader and writer
 

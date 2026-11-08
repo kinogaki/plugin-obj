@@ -2,7 +2,7 @@
 //! Y up in metres as a read takes it by default (the comment says so, OBJ records none), `uv` and
 //! `N` as `vt` and `vn`, point `Cd` as vertex colors, primitive `name` as `o`
 //! (an item without one is named after the item), `material` as `usemtl` and
-//! primitive groups as `g`. The materials item's Materials go to an MTL
+//! primitive groups as `g`. Every materials item's Materials go to one MTL
 //! library beside it (`<stem>.mtl`, named by `mtllib`), their textures named
 //! relative to it, embedded ones written beside it; `usemtl` names each by
 //! its name in the library.
@@ -13,6 +13,7 @@ use kinogaki_studio_api::color::SRGB_DISPLAY;
 use kinogaki_studio_api::edit::editor::{Placed, gather};
 use kinogaki_studio_api::format::files::Beside;
 use kinogaki_studio_api::geometry::{Attribute, Domain, Geometry, Kind, Text, Tuple, names};
+use kinogaki_studio_api::standard::Materials;
 use kinogaki_studio_api::{
     DataTypeId, Diagnostic, Error, FileFormat, FileItem, FormatOptions, FormatWriter, Writing,
     standard,
@@ -43,12 +44,13 @@ impl FormatWriter for Writer {
     ) -> Result<Vec<Diagnostic>, Error> {
         let mut warnings = Vec::new();
         let mut values = Vec::new();
-        let mut materials = None;
+        // Every library's Materials, gathered into one MTL.
+        let mut materials = Materials::default();
         for item in items {
             writing.check()?;
             let Some(data) = &item.data else { continue };
             if let Some(held) = standard::materials().get(data) {
-                materials = Some(held);
+                materials.materials.extend(held.materials.iter().cloned());
                 continue;
             }
             let value = match standard::geometry().get(data) {
@@ -87,9 +89,9 @@ impl FormatWriter for Writer {
         };
         let mut named = BTreeMap::new();
         let mut libraries = Vec::new();
-        if let Some(held) = materials.filter(|m| !m.materials.is_empty()) {
+        if !materials.materials.is_empty() {
             let mtl = path.with_extension("mtl");
-            let made = library(held, &mut Beside::new(&mtl), writing.colors)?;
+            let made = library(&materials, &mut Beside::new(&mtl), writing.colors)?;
             at_file(
                 mtl.display(),
                 crate::obj::mtl::write_file(&mtl, &made.library),
