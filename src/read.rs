@@ -78,6 +78,7 @@ pub(crate) fn read(
         warnings,
         units: reading.document_units(file_units(chosen)?),
         metadata: metadata(chosen, &libraries),
+        ..Imported::default()
     })
 }
 
