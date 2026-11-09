@@ -61,6 +61,7 @@ kinogaki-obj/round_trip test a_z_up_file_reads_into_a_y_up_project_turned_not_mi
 kinogaki-obj/round_trip test a_z_up_project_writes_its_faces_turned_not_mirrored
 kinogaki-obj/round_trip test units_up_and_scale_place_the_file_in_the_project
 kinogaki-obj/round_trip test what_is_written_reads_back
+kinogaki-obj/write test an_obj_writes_back_in_the_unit_it_was_read_in
 kinogaki-obj/write test every_part_of_the_model_round_trips
 kinogaki-obj/write test files_are_replaced_atomically_with_a_comment
 kinogaki-obj/write test invalid_models_are_refused

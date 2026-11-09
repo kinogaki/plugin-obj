@@ -209,3 +209,60 @@ fn files_are_replaced_atomically_with_a_comment() {
     assert_eq!(std::fs::read(&path).unwrap(), text);
     assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
 }
+
+/// Through the format: an OBJ read in inches, Z up, and naming its MTL
+/// library `looks.mtl` is written back in them (File ▸ Open, then a save),
+/// what any other write isn't: Y up, in metres, `<stem>.mtl`.
+#[test]
+fn an_obj_writes_back_in_the_unit_it_was_read_in() {
+    use kinogaki_obj::Obj;
+    use kinogaki_studio_api::{FileFormat, Input, Purpose, Reading, Value, Writing};
+    use kinogaki_studio_api_testing::Unconverted;
+    let scratch = Scratch::new("obj-write-back");
+    let file = scratch.join("square.obj");
+    let square =
+        "mtllib looks.mtl\nv 0 0 0\nv 10 0 0\nv 10 10 0\nv 0 10 0\nusemtl Red\nf 1 2 3 4\n";
+    std::fs::write(&file, square).unwrap();
+    std::fs::write(scratch.join("looks.mtl"), "newmtl Red\nKd 1 0 0\n").unwrap();
+    let mut options = Obj.options();
+    options.insert("unit".into(), Value::Choice("in".into()));
+    options.insert("up".into(), Value::Choice("z".into()));
+    let mm = kinogaki_studio_api::Units::MILLIMETERS;
+    let reading = Reading::new(Purpose::Document, mm, &Unconverted);
+    let read = Obj.read(&Input::file(&file), &options, &reading).unwrap();
+    let mtl = read.metadata.get("mtl");
+    assert_eq!(
+        mtl,
+        Some(&Value::Text("looks.mtl".into())),
+        "{:?}",
+        read.metadata
+    );
+    let back = scratch.join("back");
+    std::fs::create_dir_all(&back).unwrap();
+    let write = |name: &str, metadata| {
+        let writing = Writing {
+            metadata,
+            ..Writing::new(read.units.unwrap(), &Unconverted)
+        };
+        let path = back.join(name);
+        let writer = Obj.writer().unwrap();
+        writer
+            .write(&path, &read.items, &writing, &Default::default())
+            .unwrap();
+        std::fs::read_to_string(path).unwrap()
+    };
+    let text = write("square.obj", Some(&read.metadata));
+    assert!(text.starts_with("# Z up, in inches\n"), "{text}");
+    assert!(
+        text.contains("v 10 10 0\n") && text.contains("mtllib looks.mtl\n"),
+        "{text}"
+    );
+    assert!(back.join("looks.mtl").exists());
+    // Written as any other file: Y up, in metres, its own library.
+    let text = write("other.obj", None);
+    assert!(text.starts_with("# Y up, in metres\n"), "{text}");
+    assert!(
+        text.contains("v 0.254 0 -0.254\n") && text.contains("mtllib other.mtl\n"),
+        "{text}"
+    );
+}

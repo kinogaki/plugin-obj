@@ -1,11 +1,15 @@
 //! Items to one OBJ file: each item's polygons and polylines at its placement,
-//! Y up in metres as a read takes it by default (the comment says so, OBJ records none), `uv` and
+//! in the unit and up axis the file it came from was read in (the read's
+//! metadata), else Y up in metres as a read takes it by default (the comment
+//! says which, OBJ records none), `uv` and
 //! `N` as `vt` and `vn`, point `Cd` as vertex colors, primitive `name` as `o`
 //! (an item without one is named after the item), `material` as `usemtl` and
 //! primitive groups as `g`. Every materials item's Materials go to one MTL
-//! library beside it (`<stem>.mtl`, named by `mtllib`), their textures named
+//! library beside it (named as the file it came from named its own, else
+//! `<stem>.mtl`; named by `mtllib`), their textures named
 //! relative to it, embedded ones written beside it; `usemtl` names each by
 //! its name in the library.
+use crate::MTL;
 use crate::at_file;
 use crate::materials::write::library;
 use crate::obj::{NONE, Obj, Run, WriteOptions};
@@ -15,8 +19,8 @@ use kinogaki_studio_api::format::files::Beside;
 use kinogaki_studio_api::geometry::{Attribute, Domain, Geometry, Kind, Text, Tuple, names};
 use kinogaki_studio_api::standard::Materials;
 use kinogaki_studio_api::{
-    DataTypeId, Diagnostic, Error, FileFormat, FileItem, FormatOptions, FormatWriter, Writing,
-    standard,
+    DataTypeId, Diagnostic, Error, FileFormat, FileItem, FormatOptions, FormatWriter, Value,
+    Writing, standard,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -65,9 +69,15 @@ impl FormatWriter for Writer {
                 ))),
             }
         }
-        // The file holds what a read of it by default takes: Y up, in metres.
-        let defaults = crate::Obj.options();
-        let to_file = crate::read::conversion(&defaults, writing.units)?
+        // The file holds what the file it came from was read in, else what
+        // a read takes by default: Y up, in metres.
+        let mut read_in = crate::Obj.options();
+        for name in ["unit", "up"] {
+            if let Some(value) = writing.metadata.and_then(|m| m.get(name)) {
+                read_in.insert(name.to_owned(), value.clone());
+            }
+        }
+        let to_file = crate::read::conversion(&read_in, writing.units)?
             .inverse()
             .xform();
         let placed: Vec<Placed<'_>> = (values.iter())
@@ -85,12 +95,16 @@ impl FormatWriter for Writer {
             warnings.push(Diagnostic::warning(format!("{curves} curves left out")));
         }
         let options = WriteOptions {
-            comment: Some("Y up, in metres".to_owned()),
+            comment: Some(crate::read::described(&read_in)?),
         };
         let mut named = BTreeMap::new();
         let mut libraries = Vec::new();
         if !materials.materials.is_empty() {
-            let mtl = path.with_extension("mtl");
+            let kept = (writing.metadata)
+                .and_then(|m| m.get(MTL))
+                .and_then(Value::text)
+                .and_then(|name| Path::new(name).file_name());
+            let mtl = kept.map_or_else(|| path.with_extension("mtl"), |n| path.with_file_name(n));
             let made = library(&materials, &mut Beside::new(&mtl), writing.colors)?;
             at_file(
                 mtl.display(),

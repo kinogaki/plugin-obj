@@ -9,7 +9,7 @@
 use crate::materials::read::{Maps, materials};
 use crate::obj::mtl;
 use crate::obj::{Elements, NONE, Obj, ReadOptions, Run, Skipped};
-use crate::{NORMAL_MAPS, UNITS, at_file};
+use crate::{MTL, NORMAL_MAPS, UNITS, at_file};
 use kinogaki_studio_api::color::{ColorService, SRGB_DISPLAY};
 use kinogaki_studio_api::edit::editor::{Placed, gather};
 use kinogaki_studio_api::format::files::Named;
@@ -77,6 +77,7 @@ pub(crate) fn read(
         items,
         warnings,
         units: reading.document_units(file_units(chosen)?),
+        metadata: metadata(chosen, &libraries),
     })
 }
 
@@ -220,6 +221,19 @@ fn geometry(
     Ok((gather(&[Placed { value: &value, at }])?, warnings))
 }
 
+/// What the file was read in, for a write over it: the Unit and Up Axis
+/// chosen (OBJ records neither), and the MTL library its first `mtllib`
+/// names.
+fn metadata(chosen: &FormatOptions, libraries: &[String]) -> FormatOptions {
+    let mut out: FormatOptions = (["unit", "up"].into_iter())
+        .filter_map(|name| Some((name.to_owned(), chosen.get(name)?.clone())))
+        .collect();
+    if let Some(mtl) = libraries.first() {
+        out.insert(MTL.to_owned(), Value::Text(mtl.clone()));
+    }
+    out
+}
+
 /// The units `chosen` says the file is in: its unit (`scale` times the
 /// chosen one) and its up axis.
 pub(crate) fn file_units(chosen: &FormatOptions) -> Result<Units, Error> {
@@ -233,6 +247,20 @@ pub(crate) fn file_units(chosen: &FormatOptions) -> Result<Units, Error> {
         _ => UpAxis::Y,
     };
     Units::new(meters * scale, up)
+}
+
+/// What `chosen` says the file is in, as its comment says it: "Y up, in
+/// metres".
+pub(crate) fn described(chosen: &FormatOptions) -> Result<String, Error> {
+    let key = options::option(chosen, "unit", Value::choice)?;
+    let (_, label, _) = (UNITS.iter())
+        .find(|u| u.0 == key)
+        .ok_or_else(|| Error::invalid(format!("no unit {key}")))?;
+    let up = match options::option(chosen, "up", Value::choice)? {
+        "z" => "Z",
+        _ => "Y",
+    };
+    Ok(format!("{up} up, in {}", label.to_lowercase()))
 }
 
 /// The file's space in the project's of `target`: the file's unit over the

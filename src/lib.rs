@@ -48,6 +48,9 @@ const PRODUCES: &[DataTypeId] = &[standard::geometry().id(), standard::materials
 /// The option reading `bump` and `map_Bump` as normal maps (D19).
 const NORMAL_MAPS: &str = "normal_maps";
 
+/// The metadata naming the MTL library a file named first.
+const MTL: &str = "mtl";
+
 /// The format.
 pub struct Obj;
 

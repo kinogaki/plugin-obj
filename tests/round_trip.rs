@@ -166,7 +166,7 @@ fn a_file_written_in_a_projects_units_reads_back_where_it_was() {
         let dir = Scratch::new("obj");
         let file = dir.join(name);
         let item = FileItem::top("tri", standard::geometry().wrap(value.clone()));
-        let (read, said) = round_trip(&Obj, &[item], &file, units).unwrap();
+        let (read, said) = round_trip(&Obj, (&[item], None), &file, units).unwrap();
         assert!(said.is_empty() && read.warnings.is_empty(), "{said:?}");
         let geometry = |i: &FileItem| standard::geometry().get(i.data.as_ref()?).cloned();
         let back = read.items.iter().find_map(geometry).expect("its triangle");
