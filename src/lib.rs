@@ -100,10 +100,17 @@ impl FileFormat for Obj {
             Choice::new("o", "Objects (o)"),
             Choice::new("g", "Groups (g)"),
         ];
+        // File ▸ Open reads the file as it is: no Scale, its textures
+        // where they are.
+        let document = purpose == Purpose::Document;
         let schema = Schema::default().parameter(row("up", "Up Axis", up));
         let schema = schema.parameter(row("unit", "Unit", units));
         let scale = options::option(chosen, "scale", Value::number).unwrap_or(1.0);
-        let schema = options::scale(schema, scale).parameter(row("pieces", "Pieces", pieces));
+        let schema = match document {
+            true => schema,
+            false => options::scale(schema, scale),
+        };
+        let schema = schema.parameter(row("pieces", "Pieces", pieces));
         let schema = toggle(schema, "normals", "Normals", "vn");
         let schema = toggle(schema, "uvs", "UVs", "vt texture");
         let schema = toggle(schema, "materials", "Materials", "usemtl mtllib mtl");
@@ -111,7 +118,10 @@ impl FileFormat for Obj {
             return schema;
         }
         let on = |name| options::option(chosen, name, Value::bool).unwrap_or(false);
-        let schema = options::embed(schema, on(options::EMBED));
+        let schema = match document {
+            true => schema,
+            false => options::embed(schema, on(options::EMBED)),
+        };
         let words = "map_Bump bump Blender normal";
         toggle(schema, NORMAL_MAPS, "Bump Maps as Normal Maps", words)
     }

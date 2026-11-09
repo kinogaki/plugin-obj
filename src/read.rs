@@ -1,6 +1,7 @@
 //! An OBJ file to one [`Geometry`]: polygons then polylines over its points,
 //! vertex `uv` and `N`, point `Cd`, primitive `name`, `material` and groups,
-//! placed from the file's units and up axis into the project's; and the
+//! placed from the file's units and up axis into the project's (kept, for
+//! File ▸ Open); and the
 //! materials of the libraries it names (`mtllib`, reached through the SDK's
 //! `Named`) as MaterialX networks, keyed by the names its `usemtl`
 //! statements give. The tables the file's records size are charged to the
@@ -72,7 +73,11 @@ pub(crate) fn read(
             FileItem::top("Materials", standard::materials().wrap(held)),
         );
     }
-    Ok(Imported { items, warnings })
+    Ok(Imported {
+        items,
+        warnings,
+        units: reading.document_units(file_units(chosen)?),
+    })
 }
 
 /// The materials of the libraries `libraries` name (each `mtllib` value),
@@ -210,13 +215,14 @@ fn geometry(
         attributes.set_group(Domain::Primitive, name, members)?;
     }
     let value = Geometry::new(at.into(), table, attributes)?;
-    let at = conversion(chosen, reading.units)?.xform();
+    let file = file_units(chosen)?;
+    let at = Conversion::new(file, reading.document_units(file).unwrap_or(reading.units)).xform();
     Ok((gather(&[Placed { value: &value, at }])?, warnings))
 }
 
-/// The file's space in the project's: the file's unit (`scale` times the
-/// chosen one) over the project's, and the turn between their up axes.
-pub(crate) fn conversion(chosen: &FormatOptions, target: Units) -> Result<Conversion, Error> {
+/// The units `chosen` says the file is in: its unit (`scale` times the
+/// chosen one) and its up axis.
+pub(crate) fn file_units(chosen: &FormatOptions) -> Result<Units, Error> {
     let key = options::option(chosen, "unit", Value::choice)?;
     let (_, _, meters) = (UNITS.iter())
         .find(|u| u.0 == key)
@@ -226,7 +232,13 @@ pub(crate) fn conversion(chosen: &FormatOptions, target: Units) -> Result<Conver
         "z" => UpAxis::Z,
         _ => UpAxis::Y,
     };
-    Ok(Conversion::new(Units::new(meters * scale, up)?, target))
+    Units::new(meters * scale, up)
+}
+
+/// The file's space in the project's of `target`: the file's unit over the
+/// project's, and the turn between their up axes.
+pub(crate) fn conversion(chosen: &FormatOptions, target: Units) -> Result<Conversion, Error> {
+    Ok(Conversion::new(file_units(chosen)?, target))
 }
 
 /// The polygons naming no point twice and the polylines, consecutive repeats

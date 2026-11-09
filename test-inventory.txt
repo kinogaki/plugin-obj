@@ -1,6 +1,7 @@
 # Every test of this repository: <package>/<target> <kind> <name>.
 # Written by `python3 tools/check_all.py --inventory`; every check compares its tests with it.
 kinogaki-obj/doc test plugins/obj/src/obj/mod.rs - obj
+kinogaki-obj/document test its_unit_and_up_options_are_the_documents
 kinogaki-obj/fuzz test mutated_corpus_files
 kinogaki-obj/fuzz test random_bytes
 kinogaki-obj/fuzz test random_token_soup
