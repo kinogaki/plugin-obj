@@ -61,6 +61,9 @@ impl FileFormat for Obj {
     fn label(&self) -> &str {
         "Wavefront OBJ"
     }
+    fn short_label(&self) -> &str {
+        "OBJ"
+    }
     fn extensions(&self) -> &[&str] {
         &["obj"]
     }
